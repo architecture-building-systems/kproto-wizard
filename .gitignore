@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Jupyter notebook folder
+jupyter/
+*.ipynb
+
+# Egg metadata
+*.egg-info/
+*.egg
+
+# Environment variable or config files
+.env
+
+# Editor/OS-specific files (optional)
+.vscode/
+.DS_Store
+*.code-workspace
