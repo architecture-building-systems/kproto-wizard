@@ -7,77 +7,71 @@ import streamlit as st
 import pandas as pd
 from kprototypes_wizard.kproto_run import run_kprototypes_pipeline
 
-import sys
-import time
-from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-import streamlit as st
-import pandas as pd
-from kprototypes_wizard.kproto_run import run_kprototypes_pipeline
-
 def run_clustering(df, num_features, cat_features):
-        st.success("Running... this may take a minute.")
-        
-        log_area = st.empty()        
-        log_lines = []
+    # Reset logs
+    st.session_state["clustering_log"] = []
+    st.session_state["clustering_run_success"] = False
 
-        def log(msg):
-            log_lines.append(msg)
-            log_area.code("\n".join(log_lines), language="text")
+    # Placeholder for live log
+    log_display = st.empty()
 
-        # Custom loop to manually call each K and log progress
-        from kprototypes_wizard.kproto_run_evaluation import kprototypes_evaluate  # Or however you structure it
-        from kprototypes_wizard.kproto_run_encoding import kprototypes_encode  # Assuming it's modular
+    def log(msg):
+        # Append the log line to persistent storage
+        if "clustering_log" not in st.session_state:
+            st.session_state["clustering_log"] = []
+        st.session_state["clustering_log"].append(msg)
 
-        # Step 1: Encode
-        df_enc, df_num_enc, df_cat_enc, cat_map = kprototypes_encode(
-            df_raw=df,
-            num_features=num_features,
-            cat_features=cat_features
-        )
-        log("✅ Encoding complete.")
+        # Update the UI display
+        log_display.code("\n".join(st.session_state["clustering_log"]), language="text")
 
-        # Step 2: Evaluate each k
-        k_range = range(2, 20)
-        results = {
-            "costs": {},
-            "silhouette_scores": {},
-            "assignments": {},
-            "models": {}
-        }
+    # Step 1: Encoding
+    from kprototypes_wizard.kproto_run_encoding import kprototypes_encode
+    df_enc, df_num_enc, df_cat_enc, cat_map = kprototypes_encode(
+        df_raw=df,
+        num_features=num_features,
+        cat_features=cat_features
+    )
+    log("✅ Encoding complete.")
 
-        from kmodes.kprototypes import KPrototypes
-        from sklearn.metrics import silhouette_score
-        import numpy as np
+    # Step 2: Run clustering
+    from kmodes.kprototypes import KPrototypes
+    from sklearn.metrics import silhouette_score
+    import numpy as np
 
-        x_in = df_enc.to_numpy()
-        cat_inds = list(range(len(cat_features)))
+    k_range = range(2, 20)
+    x_in = df_enc.to_numpy()
+    cat_inds = list(range(len(cat_features)))
+    results = {
+        "costs": {},
+        "silhouette_scores": {},
+        "assignments": {},
+        "models": {}
+    }
 
-        for k in k_range:
-            try:
-                log(f"▶️  Trying k = {k}")
-                model = KPrototypes(n_clusters=k, init="Huang", random_state=0, n_jobs=-1)
-                labels = model.fit_predict(x_in, categorical=cat_inds)
+    for k in k_range:
+        try:
+            log(f"▶️  Trying k = {k}")
+            model = KPrototypes(n_clusters=k, init="Huang", random_state=0, n_jobs=-1)
+            labels = model.fit_predict(x_in, categorical=cat_inds)
+            results["costs"][k] = model.cost_
+            results["assignments"][k] = labels
+            results["models"][k] = model
 
-                results["costs"][k] = model.cost_
-                results["assignments"][k] = labels
-                results["models"][k] = model
+            if k > 1:
+                sil = silhouette_score(x_in, labels)
+                results["silhouette_scores"][k] = sil
+                log(f"   ✅ Success — Cost: {model.cost_:.2f}, Silhouette: {sil:.3f}")
+            else:
+                results["silhouette_scores"][k] = np.nan
+        except Exception as e:
+            log(f"   ❌ Failed for k = {k}: {e}")
+            break
 
-                if k > 1:
-                    sil = silhouette_score(x_in, labels)
-                    results["silhouette_scores"][k] = sil
-                    log(f"   ✅ Success — Cost: {model.cost_:.2f}, Silhouette: {sil:.3f}")
-                else:
-                    results["silhouette_scores"][k] = np.nan
-            except Exception as e:
-                log(f"   ❌ Failed for k = {k}: {e}")
-                break
-
-        st.session_state["pipeline_result"] = {
-            "evaluation_results": results
-        }
-        log("🎉 Clustering complete.")
+    st.session_state["pipeline_result"] = {
+        "evaluation_results": results
+    }
+    log("🎉 Clustering complete.")
+    st.session_state["clustering_run_success"] = True
 
 
 def clustering_page():
@@ -113,3 +107,9 @@ def clustering_page():
                    disabled=not st.session_state["clustering_run_success"]):
         st.session_state["current_page"] = "Review Results"
         st.rerun()
+
+    if "clustering_log" in st.session_state:
+        st.code("\n".join(st.session_state["clustering_log"]), language="text")
+
+    # if st.button("Clear Log"):
+    #     st.session_state.pop("clustering_log", None)

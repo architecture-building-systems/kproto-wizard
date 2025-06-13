@@ -29,36 +29,46 @@ def preprocessing_page():
     if "col_assignments_verified" not in st.session_state:
         st.session_state["col_assignments_verified"] = False
 
-    df = st.session_state["df_raw"]
-
-    st.header("Assign Column Types")
-
+    # Make sure df is present
     if "df_raw" not in st.session_state:
         st.warning("Please upload a CSV file first.")
         return
 
-    # Initialize column metadata only once
+    df = st.session_state["df_raw"]
+    st.header("Assign Column Types")
+
+    # Load or prepare column summary
     if "prep_result" not in st.session_state:
         prep_result = prepare_user_csv(df)
         st.session_state["prep_result"] = prep_result
+    else:
+        prep_result = st.session_state["prep_result"]
 
-        # Initialize only if not yet present
-        if "col_assignments" not in st.session_state:
-            st.session_state["col_assignments"] = {
-                col["name"]: col["inferred_type"] for col in prep_result["column_summary"]
-            }
+    # Initialize column assignments only once
+    if "col_assignments" not in st.session_state:
+        inferred = {
+            col["name"]: col["inferred_type"] for col in prep_result["column_summary"]
+        }
+        # Force "name" column to be excluded
+        if "name" in inferred:
+            inferred["name"] = "off"
+        st.session_state["col_assignments"] = inferred
 
-        if "column_info" not in st.session_state:
-            st.session_state["column_info"] = {
-                col["name"]: (col["dtype"], col["unique"]) for col in prep_result["column_summary"]
-            }
+    # Initialize column info if missing
+    if "column_info" not in st.session_state:
+        st.session_state["column_info"] = {
+            col["name"]: (col["dtype"], col["unique"]) for col in prep_result["column_summary"]
+        }
 
 
     # Navigation Pane
     back,action1,action2,action3,next = st.columns([1,1,2,1,1])
     if back.button("← Back", use_container_width=True):
-        st.session_state["current_page"] = "Upload Input"
-        st.rerun()
+        st.session_state["go_back"] = True
+        if st.session_state.get("go_back"):
+            st.session_state["current_page"] = "Upload Input"
+            st.session_state["go_back"] = False
+            st.rerun()
     if action2.button("Save Assignments", 
                       icon=":material/save:", 
                       use_container_width=True,
@@ -70,8 +80,11 @@ def preprocessing_page():
                    type="primary", 
                    use_container_width=True, 
                    disabled=not st.session_state["col_assignments_verified"]):
-        st.session_state["current_page"] = "Run Clustering"
-        st.rerun()
+        st.session_state["go_next"] = True
+        if st.session_state.get("go_next"):
+            st.session_state["current_page"] = "Run Clustering"
+            st.session_state["go_next"] = False  # reset
+            st.rerun()
     
     st.divider()
     st.caption("Review each column and assign it as categorical, numerical, or off.")
@@ -96,13 +109,14 @@ def preprocessing_page():
         with c3:
             st.markdown(f"`{n_unique}`")
         with c4:
-            choice = st.segmented_control(
+            st.segmented_control(
                 label="Options",
                 label_visibility="collapsed",
-                options= ["categorical", "numerical", "off"],
+                options=["categorical", "numerical", "off"],
                 format_func=lambda opt: f"{opt}",
                 selection_mode="single",
                 key=f"assign_{col_name}",
                 default=default_type,
-                on_change=col_assignments_unverified()
+                disabled=(col_name == "name"),
+                on_change=col_assignments_unverified  # fixed this line
             )

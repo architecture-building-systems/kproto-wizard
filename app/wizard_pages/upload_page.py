@@ -6,24 +6,16 @@ import streamlit as st
 import pandas as pd
 
 def upload_page():
-    st.header("Upload your building dataset")
-
-    # Initialize persistent session flag
-    if "upload_success" not in st.session_state:
-        st.session_state["upload_success"] = False
+    st.title("Upload Your Dataset")
+    st.markdown("""
+    Upload a CSV or Excel file containing your building data. Requirements:
+    - First column must be named **"name"** (case-sensitive)
+    - No missing values
+    - Only numeric and string-type columns
+    - Reasonable row count (<= 5000 for MVP)
+    """)
 
     uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xls", "xlsx"])
-
-    uploder = st.container(border=True)
-    with uploder:
-        st.markdown("""
-        Select a CSV or Excel file containing your building data for clustering. Requirements:
-        - First column header is `id`
-        - No `None` or `NaN` values
-        - Only numeric and string-type columns
-        """)
-
-
 
     if uploaded_file is not None:
         try:
@@ -32,27 +24,34 @@ def upload_page():
             elif uploaded_file.name.endswith((".xls", ".xlsx")):
                 df = pd.read_excel(uploaded_file)
             else:
-                st.session_state["upload_success"] = False
                 st.error("Unsupported file format.")
                 return
 
+            # Check: First column must be named "name"
+            if df.columns[0] != "name":
+                st.error("The first column must be titled 'name' (case-sensitive). Please correct and re-upload.")
+                return
+
+            # Check for missing values
             if df.isnull().any().any():
-                st.session_state["upload_success"] = False
                 st.error("Your dataset contains missing values. Please clean it and re-upload.")
-            else:
-                st.session_state["df_raw"] = df
-                st.session_state["upload_success"] = True
-                st.success("File accepted! Continue to assign column types.")
+                return
+
+            st.session_state["df_raw"] = df
+            st.session_state["upload_verified"] = True
+            st.success("File accepted! Continue to assign column types.")
 
         except Exception as e:
-            st.session_state["upload_success"] = False
-            st.error(f"Error reading file: {e}")
+            st.error(f"Failed to process file: {e}")
 
-    # Navigation Pane
-    back,action1,action2,action3,next = st.columns([1,1,2,1,1])
-    if next.button("Next →", 
-                   type="primary", 
-                   use_container_width=True, 
-                   disabled=not st.session_state["upload_success"]):
-        st.session_state["current_page"] = "Assign Column Types"
-        st.rerun()
+    # Navigation Button (disabled unless upload successful)
+    left, _, _, _, right = st.columns([1, 1, 2, 1, 1])
+    if right.button(
+        "Next →", type="primary", use_container_width=True,
+        disabled=not st.session_state.get("upload_verified", False)):
+        
+        st.session_state["go_next"] = True
+        if st.session_state.get("go_next"):
+            st.session_state["current_page"] = "Assign Column Types"
+            st.session_state["go_next"] = False  # reset
+            st.rerun()
