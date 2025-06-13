@@ -21,13 +21,17 @@ def save_column_settings(assignments):
     st.session_state["col_assignments"] = assignments
     st.success(f"Saved: {len(num)} numerical and {len(cat)} categorical features.")
 
+def col_assignments_unverified():
+     on_change=st.session_state["col_assignments_verified"] = False
  
 def preprocessing_page():
 
+    if "col_assignments_verified" not in st.session_state:
+        st.session_state["col_assignments_verified"] = False
+
     df = st.session_state["df_raw"]
 
-    st.title("Assign Column Types")
-    st.caption("Review each column and assign it as categorical, numerical, or off.")
+    st.header("Assign Column Types")
 
     if "df_raw" not in st.session_state:
         st.warning("Please upload a CSV file first.")
@@ -50,14 +54,30 @@ def preprocessing_page():
             }
 
 
-    # Save button (top)
-    if st.button("💾 Save Column Settings"):
+    # Navigation Pane
+    back,action1,action2,action3,next = st.columns([1,1,2,1,1])
+    if back.button("← Back", use_container_width=True):
+        st.session_state["current_page"] = "Upload Input"
+        st.rerun()
+    if action2.button("Save Assignments", 
+                      icon=":material/save:", 
+                      use_container_width=True,
+                      type="primary" if not st.session_state["col_assignments_verified"] else "secondary"):
         save_column_settings(collect_current_assignments(df))
-
-    st.markdown("### Feature Assignment Table")
+        st.session_state["col_assignments_verified"] = True
+        st.rerun()
+    if next.button("Next →", 
+                   type="primary", 
+                   use_container_width=True, 
+                   disabled=not st.session_state["col_assignments_verified"]):
+        st.session_state["current_page"] = "Run Clustering"
+        st.rerun()
+    
+    st.divider()
+    st.caption("Review each column and assign it as categorical, numerical, or off.")
 
     # Simulated header row
-    h1, h2, h3, h4 = st.columns([2, 1, 1, 5])
+    h1, h2, h3, h4 = st.columns([2, 1, 1, 3])
     h1.markdown("**Column**")
     h2.markdown("**Dtype**")
     h3.markdown("**Unique**")
@@ -68,7 +88,7 @@ def preprocessing_page():
         dtype, n_unique = st.session_state["column_info"][col_name]
         default_type = st.session_state["col_assignments"].get(col_name, "off")
 
-        c1, c2, c3, c4 = st.columns([2, 1, 1, 5])
+        c1, c2, c3, c4 = st.columns([2, 1, 1, 3])
         with c1:
             st.markdown(f"**{col_name}**")
         with c2:
@@ -76,16 +96,13 @@ def preprocessing_page():
         with c3:
             st.markdown(f"`{n_unique}`")
         with c4:
-            st.radio(
-                label="",
-                options=["categorical", "numerical", "off"],
-                horizontal=True,
+            choice = st.segmented_control(
+                label="Options",
+                label_visibility="collapsed",
+                options= ["categorical", "numerical", "off"],
+                format_func=lambda opt: f"{opt}",
+                selection_mode="single",
                 key=f"assign_{col_name}",
-                index=["categorical", "numerical", "off"].index(default_type)
+                default=default_type,
+                on_change=col_assignments_unverified()
             )
-
-    st.divider()
-
-    # Save button (bottom)
-    if st.button("💾 Save Column Settings (Bottom)"):
-        save_column_settings(collect_current_assignments(df))

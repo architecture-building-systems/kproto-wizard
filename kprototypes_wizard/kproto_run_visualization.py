@@ -49,7 +49,7 @@ def plot_kprototypes_results(
 
     # Silhouette curve
     fig.add_trace(go.Scatter(
-        x=x_vals, y=silhouette_vals, name='Silhouette', mode='lines+markers', line=dict(color='rgb(236,90,83)')
+        x=x_vals, y=silhouette_vals, name='Silhouette', mode='lines+markers', line=dict(color='#7741EC')
     ), secondary_y=True)
 
     # Horizontal threshold line
@@ -60,9 +60,9 @@ def plot_kprototypes_results(
         fig.add_trace(go.Scatter(
             x=[peak_k], y=[silhouettes[peak_k]], mode='markers+text',
             text=[f'Peak (k={peak_k})'], textposition='top center',
-            marker=dict(size=10, color='rgb(236,90,83)'), name='Peak'
+            marker=dict(size=10, color="#7741EC"), name='Peak'
         ), secondary_y=True)
-        fig.add_vline(x=peak_k, line=dict(dash='dash', color='rgb(236,90,83)'))
+        fig.add_vline(x=peak_k, line=dict(dash='dash', color='#7741EC'))
 
 
     # Shoulder marker
@@ -70,7 +70,7 @@ def plot_kprototypes_results(
         fig.add_trace(go.Scatter(
             x=[shoulder_k], y=[silhouettes[shoulder_k]], mode='markers+text',
             text=[f'Shoulder (k={shoulder_k})'], textposition='bottom center',
-            marker=dict(size=10, color='rgb(236,90,83)'), name='Shoulder'
+            marker=dict(size=10, color="#7741EC"), name='Shoulder'
         ), secondary_y=True)
         fig.add_vline(x=shoulder_k, line=dict(dash='dash'))
 

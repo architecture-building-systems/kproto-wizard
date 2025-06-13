@@ -7,20 +7,19 @@ import streamlit as st
 import pandas as pd
 from kprototypes_wizard.kproto_run import run_kprototypes_pipeline
 
-def clustering_page():
-    st.title("Run K-Prototypes Clustering")
+import sys
+import time
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-    if "df_raw" not in st.session_state or "num_features" not in st.session_state:
-        st.warning("Please complete column assignment first.")
-        return
+import streamlit as st
+import pandas as pd
+from kprototypes_wizard.kproto_run import run_kprototypes_pipeline
 
-    df = st.session_state["df_raw"]
-    num_features = st.session_state["num_features"]
-    cat_features = st.session_state["cat_features"]
-
-    if st.button("Start Clustering"):
+def run_clustering(df, num_features, cat_features):
         st.success("Running... this may take a minute.")
-        log_area = st.empty()
+        
+        log_area = st.empty()        
         log_lines = []
 
         def log(msg):
@@ -79,3 +78,38 @@ def clustering_page():
             "evaluation_results": results
         }
         log("🎉 Clustering complete.")
+
+
+def clustering_page():
+    st.header("Run K-Prototypes Clustering")
+
+    if "df_raw" not in st.session_state or "num_features" not in st.session_state:
+        st.warning("Please complete column assignment first.")
+        return
+    
+    if "clustering_run_success" not in st.session_state:
+        st.session_state["clustering_run_success"] = False
+
+    df = st.session_state["df_raw"]
+    num_features = st.session_state["num_features"]
+    cat_features = st.session_state["cat_features"]
+
+
+    # Navigation Pane
+    back,action1,action2,action3,next = st.columns([1,1,2,1,1])
+    if back.button("← Back", use_container_width=True):
+        st.session_state["current_page"] = "Assign Column Types"
+        st.rerun()
+    if action2.button("Start Clustering", 
+                      icon=":material/network_intelligence:", 
+                      use_container_width=True,
+                      type="primary" if not st.session_state["clustering_run_success"] else "secondary"):
+        run_clustering(df, num_features, cat_features)
+        st.session_state["clustering_run_success"] = True
+        st.rerun()
+    if next.button("Next →", 
+                   type="primary", 
+                   use_container_width=True, 
+                   disabled=not st.session_state["clustering_run_success"]):
+        st.session_state["current_page"] = "Review Results"
+        st.rerun()

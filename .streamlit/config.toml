@@ -1,0 +1,21 @@
+[server]
+enableStaticServing = true
+
+[[theme.fontFaces]]
+family="inter-regular"
+url="app/static/InterVariable.ttf"
+style="normal"
+# weight="400"
+
+[[theme.fontFaces]]
+family="inter-semibold"
+url="app/static/InterVariable.ttf"
+style="normal"
+# weight="600"
+
+[theme]
+font = "inter-regular, sans-serif"
+headingFont = "inter-regular, sans-serif"
+
+primaryColor ="#7741EC"
+base = "dark"
