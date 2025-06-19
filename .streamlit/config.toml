@@ -17,5 +17,5 @@ style="normal"
 font = "inter-regular, sans-serif"
 headingFont = "inter-regular, sans-serif"
 
-primaryColor ="#7741EC"
-base = "dark"
+primaryColor ="#1471b0"
+base = "light"

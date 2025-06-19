@@ -40,14 +40,21 @@ def download_page():
     # Explain contents
     with st.container(border=True):
         st.subheader("What's in the ZIP?")
-        c1, c2, c3 = st.columns(3)
-        with c1: st.text("Cluster Overview\n(Summary table)")
-        with c2: st.text("Clustered Data\n(Assignments per input)")
-        with c3: st.text("Original Data\n(Unmodified upload)")
+        st.markdown("""
+            :material/category: — Cluster overview (Summary table)
+            
+            :material/table_convert: — Clustered data (Assignments per input)
+            
+            :material/table: — Original Data (Unmodified upload)
+                    """)
+        # c1, c2, c3 = st.columns(3)
+        # with c1: st.text("Cluster Overview\n(Summary table)")
+        # with c2: st.text("Clustered Data\n(Assignments per input)")
+        # with c3: st.text("Original Data\n(Unmodified upload)")
 
 
     # Choose filetype + download
-    format_picker, download = st.columns([3, 3])
+    format_picker, download = st.columns([4, 2])
     with format_picker:
         format_choice = st.segmented_control(
         label="Download Format",
