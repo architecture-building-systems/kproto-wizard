@@ -1,12 +1,16 @@
 import pandas as pd
-from kmodes.kprototypes import KPrototypes
-from sklearn.metrics import silhouette_score
 import numpy as np
 
 from kprototyper.session import KPrototyperSession
 
-from kprototyper.encoding import kprototypes_encode
-from kprototyper.evaluation import kprototypes_evaluate
+import logging
+logger = logging.getLogger(__name__)
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
+
+from kmodes.kmodes import encode_features
+from kmodes.kprototypes import KPrototypes
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -108,6 +112,78 @@ def create_session_from_df(df: pd.DataFrame, session_id: str) -> KPrototyperSess
     return session
 
 
+def encode_numerical(df, num_features, encoder=None):
+    """ encodes numerical features using the provided encoder (default: StandardScaler) """
+    if encoder is None:
+        encoder = StandardScaler()
+
+    # fail-safe: check for non-numeric data
+    for col in num_features:
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            raise TypeError(
+                f"[ERROR] Column '{col}' was passed as a numerical feature, but it contains non-numeric data. "
+                f"Please check the column or reassign it to categorical features."
+            )
+
+    encoded = encoder.fit_transform(df[num_features])
+    encoded_df = pd.DataFrame(encoded, columns=num_features, index=df.index)
+
+    logger.info(f"Encoded {len(num_features)} numerical features.")
+    return encoded_df, encoder
+
+
+def encode_categorical(df, cat_features):
+    """ encodes categorical features using kmodes integer encoder """
+
+    # fail-safe: check for non-categorical data
+    for col in cat_features:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            raise TypeError(
+                f"[ERROR] Column '{col}' was passed as a categorical feature, but it contains numeric data. "
+                f"Please check whether it should be treated as a numerical feature."
+            )
+
+    cat_array = df[cat_features].values
+    encoded_array, enc_map = encode_features(cat_array)
+
+    # handle 1D case (single column)
+    if encoded_array.ndim == 1:
+        encoded_array = encoded_array.reshape(-1, 1)
+    
+    encoded_df = pd.DataFrame(encoded_array, columns=cat_features, index=df.index)
+
+    logger.info(f"Encoded {len(cat_features)} categorical features.")
+    return encoded_df, enc_map
+
+
+def kprototypes_encode(df_raw, num_features, cat_features, num_encoder=None, log_func=None):
+    '''
+    Splits and encodes mixed-type dataframe for use with k-protoypes clustering, with type checks.
+
+    Parameters:
+        df_raw (pd.Dataframe):  Original mixed-type DataFrame
+        num_features (list):    List of numerical feature column names
+        cat_features (list):    List of categorical features column names
+        num_encoder (sklearn-like): Encoder for numerical data (default: StandardScaler)
+
+    Returns:
+        df_encoded (pd.DataFrame):  Combined encoded DataFrame
+        df_num_enc (pd.DataFrame):  Encoded numerical DataFrame
+        df_cat_enc (pd.DataFrame):  Encoded categorical DataFrame
+        cat_enc_map (dict):         Mapping from cagegorical labels to integers
+    '''
+
+    if log_func: log_func("🔧 Encoding numerical and categorical features...")
+
+    df_num_enc, fitted_num_encoder = encode_numerical(df_raw, num_features)
+    df_cat_enc, cat_enc_map = encode_categorical(df_raw, cat_features)
+
+    df_encoded = pd.concat([df_num_enc, df_cat_enc], axis=1)
+
+    if log_func: log_func("✅ Encoding complete.")
+    return df_encoded, df_num_enc, df_cat_enc, cat_enc_map
+
+
 def detect_k_recommendations(silhouette_scores: dict, threshold: float = 0.5):
     """
     Detects the peak and shoulder k-values from silhouette scores.
@@ -136,24 +212,71 @@ def detect_k_recommendations(silhouette_scores: dict, threshold: float = 0.5):
     return peak_k, shoulder_k
 
 
-def run_kprototypes_clustering(df_raw, column_types, k_range=(2, 30)):
+def kprototypes_evaluate(df_encoded, categorical_indicies, k_range=(2,30), init='Huang', verbose=False, stop_on_failure=True, log_func=None):
+    """
+    Runs k-prototypes clustering over a range of k-values.
+    """
+    x_in = df_encoded.to_numpy()
+
+    costs = {}
+    silhouette_scores = {}
+    assignments = {}
+    models = {}
+
+    for k in k_range:
+        try:
+            if log_func: log_func(f"▶️ Trying k = {k}")
+
+            model = KPrototypes(n_clusters=k, init=init, n_jobs=-2, random_state=0)
+            clusters = model.fit_predict(x_in, categorical=categorical_indicies)
+
+            costs[k] = model.cost_
+            assignments[k] = clusters
+            models[k] = model
+
+            if k > 1 and isinstance(clusters, np.ndarray):
+                silhouette_avg = silhouette_score(x_in, clusters)
+                silhouette_scores[k] = silhouette_avg
+                if log_func: log_func(f"✅ Success — Cost: {model.cost_:.2f}, Silhouette: {silhouette_avg:.3f}")
+            else:
+                silhouette_scores[k] = np.nan
+
+        except ValueError as e:
+            if log_func: log_func(f"❌ Failed for k = {k}: {e}")
+            if stop_on_failure:
+                break
+            else:
+                costs[k] = np.nan
+                silhouette_scores[k] = np.nan
+
+    return {
+        'costs': costs,
+        'silhouette_scores': silhouette_scores,
+        'assignments': assignments,
+        'models': models
+    }
+
+
+def run_kprototypes_clustering(df_raw, column_types, k_range=(2, 30), log_func=None):
     """
     Full pipeline for encoding, training, and evaluating k-prototypes clustering.
     Returns best model outputs and evaluation metrics.
     """
+    if log_func: log_func("🔍 Selecting columns and preparing features...")
+
     # Step 1: Identify features by type
     selected_cols = [col for col, t in column_types.items() if t != "off"]
     num_features = [col for col in selected_cols if column_types[col] == "numerical"]
     cat_features = [col for col in selected_cols if column_types[col] == "categorical"]
 
     # Step 2: Encode data
-    df_encoded, df_num, df_cat, cat_enc_map = kprototypes_encode(df_raw, num_features, cat_features)
+    df_encoded, df_num, df_cat, cat_enc_map = kprototypes_encode(df_raw, num_features, cat_features, log_func=log_func)
 
     # Step 3: Get index positions of categorical columns in encoded dataframe
     cat_indices = list(range(len(num_features), len(num_features) + len(cat_features)))
 
     # Step 4: Run k-evaluation
-    results = kprototypes_evaluate(df_encoded, categorical_indicies=cat_indices, k_range=range(*k_range), stop_on_failure=True)
+    results = kprototypes_evaluate(df_encoded, categorical_indicies=cat_indices, k_range=range(*k_range), log_func=log_func)
 
     if not results["assignments"]:
         raise ValueError("Clustering failed for all values of k.")
@@ -176,11 +299,12 @@ def run_kprototypes_clustering(df_raw, column_types, k_range=(2, 30)):
     return (
         clustered_df,
         overview,
-        best_k,  # still based on cost
+        best_k,
         results["costs"],
         results["silhouette_scores"],
         peak_k,
-        shoulder_k
+        shoulder_k,
+        results["assignments"]
     )
 
 
