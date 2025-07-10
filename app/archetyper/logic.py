@@ -93,20 +93,3 @@ def generate_zone_dataframe(session: ArchetyperSession) -> pd.DataFrame:
     zone_data.drop(columns=["cluster"], inplace=True)
 
     return zone_data
-
-def export_zone_dataframe_ui(session):
-    st.markdown("### 📤 Export Zone Table")
-
-    if st.button("Generate Zone DataFrame"):
-        zone_df = generate_zone_dataframe(session)
-
-        st.success("Zone table generated.")
-        st.dataframe(zone_df)
-
-        csv = zone_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download as CSV",
-            data=csv,
-            file_name=f"zone_{session.name}.csv",
-            mime="text/csv"
-        )

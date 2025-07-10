@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 
 from archetyper.session import ArchetyperSession
-from archetyper.logic import load_archetype_database, normalize_session_key, is_valid_session_name, export_zone_dataframe_ui
+from archetyper.logic import load_archetype_database, normalize_session_key, is_valid_session_name, generate_zone_dataframe
 
 
 # ---------- Session State Utilities ----------
@@ -76,10 +76,107 @@ def rename_session(old_key: str, new_name: str):
         st.success(f"Renamed session to `{new_name}`.")
 
 
-# ---------- UI HELPER ----------
+# ----------  UI HELPER FUNCTIONS ----------
+
+def show_create_session_ui():
+    st.markdown("###### Create New Session")
+
+    name = st.text_input("Session name")
+    db_base_path = Path("app/databases")
+    available_regions = sorted([p.name for p in db_base_path.iterdir() if p.is_dir()])
+    region = st.selectbox("Database region", available_regions)
+
+    source = st.radio("Clustered dataset source", ["Use KPrototyper session", "Upload manually"])
+    clustered_df = None
+
+    if source == "Use KPrototyper session":
+        if "kprototyper" in st.session_state and hasattr(st.session_state.kprototyper, "clustered_df"):
+            clustered_df = st.session_state.kprototyper.clustered_df
+            st.success("Using clustered data from KPrototyper.")
+        else:
+            st.error("No KPrototyper session found.")
+    else:
+        uploaded_file = st.file_uploader("Upload clustered dataset (CSV or XLSX)", type=["csv", "xlsx"])
+        if uploaded_file:
+            clustered_df = (
+                pd.read_excel(uploaded_file) if uploaded_file.name.endswith("xlsx")
+                else pd.read_csv(uploaded_file)
+            )
+            st.success("Clustered dataset uploaded.")
+
+    if st.button("Create Session", type="primary", use_container_width=True):
+        if not name or not is_valid_session_name(name):
+            st.error("Invalid session name. Only letters, numbers, spaces, underscores, and hyphens are allowed.")
+        else:
+            key = normalize_session_key(name)
+            if key in st.session_state["archetyper__sessions"]:
+                st.error(f"A session named `{name}` already exists. Please choose a different name.")
+            elif not region or clustered_df is None:
+                st.error("Please complete all fields and provide a valid dataset.")
+            elif "cluster" not in clustered_df.columns or "name" not in clustered_df.columns:
+                st.error("Dataset must contain 'cluster' and 'name' columns.")
+            else:
+                create_archetyper_session(name, region, clustered_df)
+                st.rerun()
+
+def show_switch_session_ui():
+    st.markdown("###### Switch Active Session")
+
+    session_keys = list_sessions()
+    if session_keys:
+        labels = {k: st.session_state["archetyper__sessions"][k].name for k in session_keys}
+        selected_key = st.selectbox("Choose session", session_keys, format_func=lambda k: labels[k])
+        if st.button("Set Active Session", use_container_width=True):
+            set_active_session(selected_key)
+            st.success(f"Switched to session: `{labels[selected_key]}`")
+    else:
+        st.info("No sessions available.")
+
+def show_manage_session_ui():
+    st.markdown("###### Rename or Delete Sessions")
+
+    keys = list_sessions()
+    if not keys:
+        st.info("No sessions to manage.")
+        return
+
+    selected = st.selectbox("Manage session", keys, key="manage_select")
+
+    st.divider()
+
+    new_name = st.text_input("Rename session to:", key="rename_input")
+
+    if st.button("Rename Session", use_container_width=True):
+        if not new_name.strip():
+            st.error("New name cannot be empty.")
+        else:
+            rename_session(selected, new_name)
+
+    st.divider()
+    confirm_delete = st.checkbox("Confirm deletion")
+    if st.button("Delete Session", type="primary", disabled=not confirm_delete, use_container_width=True):
+        delete_session(selected)
+        st.success(f"Deleted session `{selected}`.")
+
+def show_reload_database_ui():
+    st.markdown("###### Reload Archetype Database")
+
+    active = get_active_session()
+    if st.button("Reload", use_container_width=True):
+        if active:
+            base_path = Path("app/databases") / active.region
+            missing = load_archetype_database(active, active.region, base_path)
+            if missing:
+                st.warning("Reloaded with missing files:")
+                for f in missing:
+                    st.code(f)
+            else:
+                st.success("Archetype database reloaded successfully.")
+        else:
+            st.info("No active session selected.")
 
 def map_numeric_fields_ui(session):
-    st.markdown("### 🧾 Map Numeric Building Fields")
+    st.markdown("#### Map Numeric Building Fields")
 
     numeric_fields = ["floors_ag", "floors_bg", "height_ag", "height_bg", "year"]
     available_cols = list(session.clustered_df.columns)
@@ -87,19 +184,18 @@ def map_numeric_fields_ui(session):
     if not hasattr(session, "field_mapping"):
         session.field_mapping = {}
 
-    with st.expander("📊 Assign Source Columns", expanded=True):
-        for field in numeric_fields:
-            default = session.field_mapping.get(field)
-            selected = st.selectbox(
-                f"Map `{field}` to column:",
-                ["(not mapped)"] + available_cols,
-                index=(available_cols.index(default) + 1) if default in available_cols else 0,
-                key=f"fieldmap_{field}"
-            )
-            session.field_mapping[field] = selected if selected != "(not mapped)" else None
+    for field in numeric_fields:
+        default = session.field_mapping.get(field)
+        selected = st.selectbox(
+            f"Map `{field}` to column:",
+            ["(not mapped)"] + available_cols,
+            index=(available_cols.index(default) + 1) if default in available_cols else 0,
+            key=f"fieldmap_{field}"
+        )
+        session.field_mapping[field] = selected if selected != "(not mapped)" else None
 
 def assign_archetypes_ui(session):
-    st.markdown("### 🏷️ Assign Archetypes to Clusters")
+    st.markdown("#### Assign Archetypes to Clusters")
 
     # Ensure required data exists
     if not hasattr(session, "construction_types") or session.construction_types is None:
@@ -142,7 +238,7 @@ def assign_archetypes_ui(session):
             st.error("Please assign an archetype to each cluster.")
 
 def assign_use_types_ui(session):
-    st.markdown("### 🧩 Assign Use Types to Clusters")
+    st.markdown("#### Assign Use Types to Clusters")
 
     if not hasattr(session, "use_types") or session.use_types is None:
         st.error("Use types table not found in session.")
@@ -187,133 +283,97 @@ def assign_use_types_ui(session):
 
         session.use_type_map[cluster_id] = types
 
+def export_zone_dataframe_ui(session):
+    st.markdown("#### Export Zone Table")
+
+    if st.button("Generate Zone DataFrame"):
+        zone_df = generate_zone_dataframe(session)
+
+        st.success("Zone table generated.")
+        st.dataframe(zone_df)
+
+        csv = zone_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download as CSV",
+            data=csv,
+            file_name=f"zone_{session.name}.csv",
+            mime="text/csv"
+        )
+
+def show_debug_panel(session):
+    st.markdown("#### Debug: Active Session State")
+
+    st.markdown("###### Archetype Map (cluster → const_type)")
+    st.json(session.archetype_map if hasattr(session, "archetype_map") else {})
+
+    st.markdown("###### Use Type Map (cluster → [(use_type, ratio), ...])")
+    st.json(session.use_type_map if hasattr(session, "use_type_map") else {})
+
+    st.markdown("###### Field Mapping (output field → input column)")
+    st.json(session.field_mapping if hasattr(session, "field_mapping") else {})
+
+    st.markdown("###### Sample Clustered Data")
+    st.dataframe(session.clustered_df.head())
+
+    st.markdown("###### Construction Types")
+    if hasattr(session, "construction_types"):
+        st.dataframe(session.construction_types)
+    else:
+        st.warning("`construction_types` not loaded.")
+
+    st.markdown("###### Use Types")
+    if hasattr(session, "use_types"):
+        st.dataframe(session.use_types)
+    else:
+        st.warning("`use_types` not loaded.")
+
+    st.caption(f"Session key: `{normalize_session_key(session.name)}` | Region: `{session.region}`")
 
 
 # ---------- UI ----------
 
 def show_archetyper_ui():
     init_archetyper_state()
-    st.markdown("## 🧬 Archetyper")
-
-    # ---- SESSION CREATION ----
-    with st.expander("➕ Create New Session", expanded=True):
-        name = st.text_input("Session name")
-        
-        # Get available regions from subfolders
-        db_base_path = Path("app/databases")
-        available_regions = sorted([p.name for p in db_base_path.iterdir() if p.is_dir()])
-        region = st.selectbox("Database region", available_regions)
-
-        source = st.radio("Clustered dataset source", ["Use KPrototyper session", "Upload manually"])
-        clustered_df = None
-
-        if source == "Use KPrototyper session":
-            if "kprototyper" in st.session_state and hasattr(st.session_state.kprototyper, "clustered_df"):
-                clustered_df = st.session_state.kprototyper.clustered_df
-                st.success("Using clustered data from KPrototyper.")
-            else:
-                st.error("No KPrototyper session found.")
-        else:
-            uploaded_file = st.file_uploader("Upload clustered dataset (CSV or XLSX)", type=["csv", "xlsx"])
-            if uploaded_file:
-                clustered_df = (
-                    pd.read_excel(uploaded_file) if uploaded_file.name.endswith("xlsx")
-                    else pd.read_csv(uploaded_file)
-                )
-                st.success("Clustered dataset uploaded.")
-
-        if st.button("Create Session"):
-            if not name or not region or clustered_df is None:
-                st.error("Please complete all fields and provide a valid dataset.")
-            elif "cluster" not in clustered_df.columns or "name" not in clustered_df.columns:
-                st.error("Dataset must contain 'cluster' and 'name' columns.")
-            else:
-                create_archetyper_session(name, region, clustered_df)
-                st.success(f"Session `{name}` created and activated.")
-
-    # ---- SESSION SWITCHING ----
-    st.markdown("### 🔁 Switch Active Session")
-    session_keys = list_sessions()
-    if session_keys:
-        selected_key = st.selectbox("Available sessions", session_keys)
-        if st.button("Set Active Session"):
-            set_active_session(selected_key)
-            st.success(f"Switched to session: `{selected_key}`")
-    else:
-        st.info("No sessions available yet.")
-
-    # ---- ACTIVE SESSION DETAILS ----
     active = get_active_session()
-    if active:
-        st.markdown("### ✅ Active Session")
-        st.write(f"**Name**: {active.name}")
-        st.write(f"**Region**: {active.region}")
-        st.dataframe(active.clustered_df.head())
-    else:
-        st.warning("No active session selected.")
 
-    # ---- ARCHETYPE ASSIGNMENT ----
-    active = get_active_session()
-    if active:
-        assign_archetypes_ui(active)
-        assign_use_types_ui(active)
-        map_numeric_fields_ui(active)
-        export_zone_dataframe_ui(active)
+    st.markdown(f"## :material/villa: Archetyper")    
 
-    if st.button("🔄 Reload Archetype Database"):
-        if active:
-            base_path = Path("app/databases") / active.region
-            missing_files = load_archetype_database(active, active.region, base_path)
-            if not missing_files:
-                st.success("Reloaded archetype database successfully.")
-            else:
-                st.warning("Reloaded with missing files:")
-                for f in missing_files:
-                    st.code(f)
-
-    # ---- SESSION MANAGEMENT ----
-    st.markdown("### 🛠️ Manage Existing Sessions")
-    with st.expander("🗂️ Delete or Rename Sessions", expanded=False):
-        keys = list_sessions()
-        if not keys:
-            st.info("No sessions to manage.")
-        else:
-            selected = st.selectbox("Select session to manage", keys, key="manage_select")
-
-            # --- Rename ---
-            new_name = st.text_input("Rename session to:", key="rename_input")
-            if st.button("Rename Session"):
-                if not new_name.strip():
-                    st.error("New name cannot be empty.")
-                else:
-                    rename_session(selected, new_name)
-
-            st.markdown("---")
-
-            # --- Delete ---
-            confirm_delete = st.checkbox("Confirm deletion")
-            if st.button("Delete Session", type="primary", disabled=not confirm_delete):
-                delete_session(selected)
-                st.success(f"Deleted session `{selected}`.")
+    t1, t2, t3, t4 = st.columns(4)
+    with t1.popover("New", icon=":material/add:", use_container_width=True):
+        show_create_session_ui()
     
-    with st.expander("🧪 Debug: Active Session Contents"):
-        if active:
-            st.subheader("Archetype Map")
-            st.json({
-            "archetype_map": active.archetype_map,
-            "use_type_map": active.use_type_map,
-            "field_mapping": active.field_mapping,
-        })
+    with t2.popover("Switch", icon=":material/menu_open:", use_container_width=True):
+        show_switch_session_ui()
+    
+    with t3.popover("Manage", icon=":material/settings:", use_container_width=True):
+        show_manage_session_ui()
+    
+    with t4.popover("Database", icon=":material/database:", use_container_width=True):
+        show_reload_database_ui()
 
-            st.subheader("Available Construction Types")
-            st.dataframe(active.construction_types)
 
-            st.subheader("Clustered Data Sample")
-            st.dataframe(active.clustered_df.head())
+    if not active:
+        st.warning("No active session selected. Please create or switch to a session.")
+        return
 
-            st.caption(f"Region: `{active.region}`")
-        else:
-            st.info("No active session.")
+    st.success(f"**Active Session**: {active.name} (region: {active.region})")
+
+    st.markdown(f"#### Assign Use and Construction Archetypes")
+    st.markdown(f"Populate zone table for City Energy Analyst using from clustering results and training data.")
+
+    with st.expander(":material/foundation: Assign Construction Types to Clusters"):
+        assign_archetypes_ui(active)
+
+    with st.expander(":material/location_home: Assign Use Types to Clusters"):
+        assign_use_types_ui(active)
+    
+    with st.expander(":material/123: Map Column Data to Numeric Fields"):
+        map_numeric_fields_ui(active)
+    
+    export_zone_dataframe_ui(active)
+
+    with st.expander("Debug: Session State", expanded=False):
+        show_debug_panel(active)
 
 # ---------- UI CALL ----------
 show_archetyper_ui()
