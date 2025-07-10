@@ -365,15 +365,9 @@ def show_postprocessing_ui(step_index):
 st.markdown(f"## K-Prototyper")
 step_index = KPROTO_STEPS.index(st.session_state.kproto_step)
 
-# Navigation Pane
-# cols = st.columns([4,2,2])
-# st.markdown(f"#### {st.session_state.kproto_step}")
-# if step_index > 0 and cols[0].button("← Back"):
-#     st.session_state.kproto_step = KPROTO_STEPS[step_index - 1]
-# if step_index < len(KPROTO_STEPS) - 1 and cols[1].button("Next →"):
-#     st.session_state.kproto_step = KPROTO_STEPS[step_index + 1]
 
 # Render current step
+
 step = st.session_state.kproto_step
 if step == "Upload":
     show_upload_ui(step_index)
@@ -384,8 +378,8 @@ elif step == "Run Clustering":
 elif step == "Review & Download":
     show_postprocessing_ui(step_index)
 
-# with st.sidebar:
-#     st.progress(value = (step_index + 1) / len(KPROTO_STEPS), text=st.session_state.kproto_step)
+
+# Sidebar 
 
 with st.sidebar:
     st.markdown("### K-Prototyper Progress")

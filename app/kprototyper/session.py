@@ -17,7 +17,12 @@ class KPrototyperLogger:
         self.log_lines = []
 
 class KPrototyperSession:
+    _instances = []
+
     def __init__(self, name: str):
+        # Track instances
+        self.__class__._instances.append(self)
+        
         self.name: str = name
         self.created_at: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
