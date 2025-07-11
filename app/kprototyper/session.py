@@ -17,22 +17,18 @@ class KPrototyperLogger:
         self.log_lines = []
 
 class KPrototyperSession:
-    _instances = []
-
-    def __init__(self, name: str):
-        # Track instances
-        self.__class__._instances.append(self)
-        
+    
+    def __init__(self, name: str):        
         self.name: str = name
         self.created_at: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Input
-        self.input_data: Optional[pd.DataFrame] = None
-        self.column_types: Optional[dict] = None  # {"feature1": "numerical", ...}
+        self.input_df: Optional[pd.DataFrame] = None
+        self.column_config: Optional[dict] = None  # {"feature1": "numerical", ...}
         self.column_metadata: Optional[dict] = None  # {"feature1": (dtype, n_unique), ...}
 
         # Output
-        self.clustered_data: Optional[pd.DataFrame] = None
+        self.clustered_df: Optional[pd.DataFrame] = None
         self.cluster_overview: Optional[pd.DataFrame] = None
 
         # Meta
@@ -46,8 +42,19 @@ class KPrototyperSession:
         self.status: str = "initialized"
         self.logger = KPrototyperLogger()
 
+        # Wizard Progress Tracking
+        self.step: str = "Assign Column Types"
+        self.step_success: dict = {
+            "Assign Column Types": False,
+            "Run Clustering": False,
+            "Review & Download": False
+        }
+
+        # New: session-local flag for async-like reruns
+        self.clustering_running: bool = False
+
     def is_complete(self) -> bool:
-        return self.clustered_data is not None and self.cluster_overview is not None
+        return self.clustered_df is not None and self.cluster_overview is not None
 
     def set_input(self, df: pd.DataFrame, column_types: dict, column_metadata: dict = None):
         self.input_data = df
@@ -57,7 +64,7 @@ class KPrototyperSession:
 
     def set_output(self, clustered_df: pd.DataFrame, overview_df: pd.DataFrame, k: int,
                    cost_dict: dict = None, sil_dict: dict = None, assignments=None):
-        self.clustered_data = clustered_df
+        self.clustered_df = clustered_df
         self.cluster_overview = overview_df
         self.selected_k = k
         self.cost_per_k = cost_dict
@@ -84,7 +91,7 @@ class KPrototyperSession:
         return self.assignments_per_k[k]
     
     def reset_clustering(self):
-        self.clustered_data = None
+        self.clustered_df = None
         self.cluster_overview = None
         self.selected_k = None
         self.cost_per_k = None

@@ -5,175 +5,24 @@ import streamlit as st
 import pandas as pd
 
 from archetyper.session import ArchetyperSession
-from archetyper.logic import load_archetype_database, normalize_session_key, is_valid_session_name, generate_zone_dataframe
+from archetyper.logic import (
+    normalize_session_key,
+    generate_zone_dataframe
+)
 
+from shared.utils_ui import (
+    show_create_session_ui,
+    show_switch_session_ui,
+    show_manage_session_ui,
+    show_reload_database_ui,
+)
 
-# ---------- Session State Utilities ----------
+from shared.utils_session import (
+    init_archetyper_state,
+    get_active_archetyper_session
+)
 
-def init_archetyper_state():
-    if "archetyper__sessions" not in st.session_state:
-        st.session_state["archetyper__sessions"] = {}
-    if "archetyper__active_key" not in st.session_state:
-        st.session_state["archetyper__active_key"] = None
-
-def create_archetyper_session(name: str, region: str, df: pd.DataFrame):
-    if not name or not is_valid_session_name(name):
-        st.error("Invalid session name. Only letters, numbers, spaces, underscores, and hyphens are allowed.")
-        return
-
-    key = normalize_session_key(name)
-
-    if key in st.session_state["archetyper__sessions"]:
-        st.error(f"A session named `{name}` already exists. Please choose a different name.")
-        return
-
-    session = ArchetyperSession(name, region, df)
-    base_path = Path("app/databases") / region
-    missing_files = load_archetype_database(session, region, base_path)
-
-    st.session_state["archetyper__sessions"][key] = session
-    st.session_state["archetyper__active_key"] = key
-
-    st.success(f"Session `{name}` created and activated.")
-
-    if missing_files:
-        st.warning("Some database files were missing:")
-        for f in missing_files:
-            st.code(f)
-
-def get_active_session():
-    key = st.session_state.get("archetyper__active_key")
-    return st.session_state["archetyper__sessions"].get(key) if key else None
-
-def list_sessions():
-    return list(st.session_state["archetyper__sessions"].keys())
-
-def set_active_session(key: str):
-    if key in st.session_state["archetyper__sessions"]:
-        st.session_state["archetyper__active_key"] = key
-
-def delete_session(key: str):
-    if key in st.session_state["archetyper__sessions"]:
-        del st.session_state["archetyper__sessions"][key]
-        if st.session_state["archetyper__active_key"] == key:
-            st.session_state["archetyper__active_key"] = None
-
-def rename_session(old_key: str, new_name: str):
-    sessions = st.session_state["archetyper__sessions"]
-    if old_key in sessions:
-        new_key = new_name.lower().replace(" ", "_")
-        if new_key in sessions:
-            st.error("A session with this name already exists.")
-            return
-
-        session = sessions.pop(old_key)
-        session.name = new_name  # update display name
-        sessions[new_key] = session
-
-        if st.session_state["archetyper__active_key"] == old_key:
-            st.session_state["archetyper__active_key"] = new_key
-
-        st.success(f"Renamed session to `{new_name}`.")
-
-
-# ----------  UI HELPER FUNCTIONS ----------
-
-def show_create_session_ui():
-    st.markdown("###### Create New Session")
-
-    name = st.text_input("Session name")
-    db_base_path = Path("app/databases")
-    available_regions = sorted([p.name for p in db_base_path.iterdir() if p.is_dir()])
-    region = st.selectbox("Database region", available_regions)
-
-    source = st.radio("Clustered dataset source", ["Use KPrototyper session", "Upload manually"])
-    clustered_df = None
-
-    if source == "Use KPrototyper session":
-        if "kprototyper" in st.session_state and hasattr(st.session_state.kprototyper, "clustered_df"):
-            clustered_df = st.session_state.kprototyper.clustered_df
-            st.success("Using clustered data from KPrototyper.")
-        else:
-            st.error("No KPrototyper session found.")
-    else:
-        uploaded_file = st.file_uploader("Upload clustered dataset (CSV or XLSX)", type=["csv", "xlsx"])
-        if uploaded_file:
-            clustered_df = (
-                pd.read_excel(uploaded_file) if uploaded_file.name.endswith("xlsx")
-                else pd.read_csv(uploaded_file)
-            )
-            st.success("Clustered dataset uploaded.")
-
-    if st.button("Create Session", type="primary", use_container_width=True):
-        if not name or not is_valid_session_name(name):
-            st.error("Invalid session name. Only letters, numbers, spaces, underscores, and hyphens are allowed.")
-        else:
-            key = normalize_session_key(name)
-            if key in st.session_state["archetyper__sessions"]:
-                st.error(f"A session named `{name}` already exists. Please choose a different name.")
-            elif not region or clustered_df is None:
-                st.error("Please complete all fields and provide a valid dataset.")
-            elif "cluster" not in clustered_df.columns or "name" not in clustered_df.columns:
-                st.error("Dataset must contain 'cluster' and 'name' columns.")
-            else:
-                create_archetyper_session(name, region, clustered_df)
-                st.rerun()
-
-def show_switch_session_ui():
-    st.markdown("###### Switch Active Session")
-
-    session_keys = list_sessions()
-    if session_keys:
-        labels = {k: st.session_state["archetyper__sessions"][k].name for k in session_keys}
-        selected_key = st.selectbox("Choose session", session_keys, format_func=lambda k: labels[k])
-        if st.button("Set Active Session", use_container_width=True):
-            set_active_session(selected_key)
-            st.success(f"Switched to session: `{labels[selected_key]}`")
-    else:
-        st.info("No sessions available.")
-
-def show_manage_session_ui():
-    st.markdown("###### Rename or Delete Sessions")
-
-    keys = list_sessions()
-    if not keys:
-        st.info("No sessions to manage.")
-        return
-
-    selected = st.selectbox("Manage session", keys, key="manage_select")
-
-    st.divider()
-
-    new_name = st.text_input("Rename session to:", key="rename_input")
-
-    if st.button("Rename Session", use_container_width=True):
-        if not new_name.strip():
-            st.error("New name cannot be empty.")
-        else:
-            rename_session(selected, new_name)
-
-    st.divider()
-    confirm_delete = st.checkbox("Confirm deletion")
-    if st.button("Delete Session", type="primary", disabled=not confirm_delete, use_container_width=True):
-        delete_session(selected)
-        st.success(f"Deleted session `{selected}`.")
-
-def show_reload_database_ui():
-    st.markdown("###### Reload Archetype Database")
-
-    active = get_active_session()
-    if st.button("Reload", use_container_width=True):
-        if active:
-            base_path = Path("app/databases") / active.region
-            missing = load_archetype_database(active, active.region, base_path)
-            if missing:
-                st.warning("Reloaded with missing files:")
-                for f in missing:
-                    st.code(f)
-            else:
-                st.success("Archetype database reloaded successfully.")
-        else:
-            st.info("No active session selected.")
+# ----------  UI FUNCTIONS ----------
 
 def map_numeric_fields_ui(session):
     st.markdown("#### Map Numeric Building Fields")
@@ -334,7 +183,7 @@ def show_debug_panel(session):
 
 def show_archetyper_ui():
     init_archetyper_state()
-    active = get_active_session()
+    active = get_active_archetyper_session()
 
     st.markdown(f"## :material/villa: Archetyper")    
 

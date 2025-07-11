@@ -1,131 +1,92 @@
-import streamlit as st
-from kprototyper.session import KPrototyperSession
-from kprototyper.logic import load_uploaded_file, preprocess_loaded_file, run_kprototypes_clustering, plot_kprototypes_results, create_session_from_df 
-import uuid
-import pandas as pd
-from plotly.subplots import make_subplots
 import io
+import uuid
 import zipfile
+import pandas as pd
+import streamlit as st
+from datetime import datetime
 
+from kprototyper.session import KPrototyperSession
 
-# Define wizard steps
-KPROTO_STEPS = ["Upload", "Assign Column Types", "Run Clustering", "Review & Download"]
+from kprototyper.logic import (
+    preprocess_loaded_file,
+    run_kprototypes_clustering,
+    plot_kprototypes_results
+)
 
-# Initialize navigation state
-if "kproto_step" not in st.session_state:
-    st.session_state.kproto_step = "Upload"
-if "kproto_sessions" not in st.session_state:
-    st.session_state.kproto_sessions = []
+from shared.utils import (
+    get_available_regions
+)
 
-if "kproto_step_success" not in st.session_state:
-    st.session_state.kproto_step_success = {
-        step: False for step in KPROTO_STEPS
-    }
+from shared.utils_session import (
+    init_kprototyper_state,
+    show_create_kprototyper_session_ui,
+    show_switch_kprototyper_session_ui,
+    show_manage_kprototyper_session_ui,
+    show_debug_kprototyper_session_ui,
+    export_to_archetyper
+)
+
+# -------------------------------
+# Session State
+# -------------------------------
+
+init_kprototyper_state()
 
 
 # -------------------------------
-# Step UI Utilities
+# UI 
 # -------------------------------
 
-def navigation_bar(step_index):
-    step = KPROTO_STEPS[step_index]
-    progress_state = st.session_state.kproto_step_success.get(step, False)
+def navigation_bar(session, step_index: int):
+    KPROTO_STEPS = ["Assign Column Types", "Run Clustering", "Review & Download"]
+    current_step = KPROTO_STEPS[step_index]
+    progress_state = session.step_success.get(current_step, False)
 
-    nav_container = st.container(border=False)
-    with nav_container:
-        cols = st.columns([4, 1, 1])
-        with cols[0]:
-            st.markdown(f"#### Step {step_index + 1}: {step}")
-        if step_index > 0 and cols[1].button("← Back", use_container_width=True):
-            st.session_state.kproto_step = KPROTO_STEPS[step_index - 1]
-            st.rerun()
-        if step_index < len(KPROTO_STEPS) - 1 and cols[2].button("Next →", use_container_width=True, disabled=not progress_state, type="primary"):
-            st.session_state.kproto_step = KPROTO_STEPS[step_index + 1]
-            st.rerun()
-
-
-def reset_column_assignment_flag():
-    st.session_state.kproto_step_success["Assign Column Types"] = False
-
-
-# -------------------------------
-# Step UI Functions
-# -------------------------------
-
-def show_upload_ui(step_index):
-    navigation_bar(step_index)
-
-    # Initialize flags only once
-    if "upload_success" not in st.session_state:
-        st.session_state.upload_success = False
-
-    uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
-
-    # Handle file upload only if not already successful
-    if uploaded_file and not st.session_state.upload_success:
-        try:
-            df = load_uploaded_file(uploaded_file)
-            session_id = f"run_{uuid.uuid4().hex[:6]}"
-            session = create_session_from_df(df, session_id=session_id)
-            st.session_state.kproto_sessions.append(session)
-
-            # Save session and progress flags
-            st.session_state.upload_success = True
-            st.session_state.kproto_step_success["Upload"] = True
-            st.session_state.kproto_last_session_id = session_id  # to retrieve later
-
-            st.rerun()
-
-        except ValueError as e:
-            st.error(str(e))
-
-    # Show success message and preview if upload completed
-    if st.session_state.upload_success:
-        st.success("File validated successfully.")
-
-        # Get the last session (or retrieve from session_state id)
-        last_session = st.session_state.kproto_sessions[-1]
-        st.dataframe(last_session.input_data.head())
-
-        st.success(f"Session '{st.session_state.kproto_last_session_id}' created with inferred column types.")
+    cols = st.columns([4, 1, 1])
+    with cols[0]:
+        st.markdown(f"#### Step {step_index + 1}: {current_step}")
+    if step_index > 0 and cols[1].button("← Back", use_container_width=True):
+        session.step = KPROTO_STEPS[step_index - 1]
+        st.rerun()
+    if step_index < len(KPROTO_STEPS) - 1 and cols[2].button(
+        "Next →",
+        use_container_width=True,
+        disabled=not progress_state,
+        type="primary",
+    ):
+        session.step = KPROTO_STEPS[step_index + 1]
+        st.rerun()
 
 
-def show_column_typing_ui(step_index):
-    navigation_bar(step_index)
+def show_column_typing_ui(session, step_index: int):
+    navigation_bar(session, step_index)
+    df = session.input_df
 
-    if not st.session_state.kproto_sessions:
-        st.warning("No active session. Please upload a dataset first.")
+    if df is None or df.empty:
+        st.warning("No input data found in the session.")
         return
 
-    session = st.session_state.kproto_sessions[-1]
-    df = session.input_data
-
-    if df is None:
-        st.warning("No input data found in session.")
-        return
-
-    # Infer column types if not yet assigned
-    if session.column_types is None:
+    # Infer column types and metadata if not already set
+    if session.column_config is None or session.column_metadata is None:
         metadata = preprocess_loaded_file(df)
         inferred = {col["name"]: col["inferred_type"] for col in metadata["column_summary"]}
         if "name" in inferred:
             inferred["name"] = "off"
-        session.column_types = inferred
-
-        # Save dtype/unique info for display
+        session.column_config = inferred
         session.column_metadata = {
             col["name"]: (col["dtype"], col["unique"]) for col in metadata["column_summary"]
         }
 
     if st.button("Save Assignments", icon=":material/save:", use_container_width=True, type="primary"):
         session.reset_clustering()
-        st.session_state.kproto_step_success["Run Clustering"] = False
+        session.step_success["Run Clustering"] = False  # ensure downstream is re-done
 
-        st.success(
-            f"Saved: {sum(v == 'numerical' for v in session.column_types.values())} numerical "
-            f"and {sum(v == 'categorical' for v in session.column_types.values())} categorical columns."
-        )
-        st.session_state.kproto_step_success["Assign Column Types"] = True
+        num_num = sum(v == "numerical" for v in session.column_config.values())
+        num_cat = sum(v == "categorical" for v in session.column_config.values())
+        st.success(f"Saved: {num_num} numerical and {num_cat} categorical columns.")
+
+        session.step_success["Assign Column Types"] = True
+        session.step = "Run Clustering"
         st.rerun()
 
     # Simulated header row
@@ -137,7 +98,7 @@ def show_column_typing_ui(step_index):
 
     for col in df.columns:
         dtype, n_unique = session.column_metadata.get(col, ("unknown", "?"))
-        default_type = session.column_types.get(col, "off")
+        default_type = session.column_config.get(col, "off")
 
         c1, c2, c3, c4 = st.columns([2, 1, 1, 3])
         with c1:
@@ -147,46 +108,39 @@ def show_column_typing_ui(step_index):
         with c3:
             st.markdown(f"`{n_unique}`")
         with c4:
-            session.column_types[col] = st.segmented_control(
+            session.column_config[col] = st.segmented_control(
                 label="Type",
                 label_visibility="collapsed",
                 options=["categorical", "numerical", "off"],
-                format_func=lambda x: x,
                 selection_mode="single",
-                key=f"type_{col}",
                 default=default_type,
-                disabled=(col == "name"),
-                on_change=reset_column_assignment_flag
+                format_func=lambda x: x,
+                key=f"type_{col}",
+                disabled=(col == "name")
             )
 
 
-def show_clustering_ui(step_index):
-    navigation_bar(step_index)
+def show_clustering_ui(session, step_index: int):
+    navigation_bar(session, step_index)
 
-    # --- Setup & Checks ---
-    if not st.session_state.kproto_sessions:
-        st.warning("No session found. Please upload and configure data.")
+    # --- Validate session input ---
+    df = session.input_df
+    column_config = session.column_config
+
+    if df is None or column_config is None:
+        st.warning("Missing input data or column assignments.")
         return
 
-    session = st.session_state.kproto_sessions[-1]
-
-    if session.input_data is None or session.column_types is None:
-        st.warning("Missing input data or column types.")
-        return
-
-    if "kproto_clustering_running" not in st.session_state:
-        st.session_state.kproto_clustering_running = False
-
-    # --- Layout containers ---
+    # --- Containers ---
     button_container = st.container()
     log_display = st.empty()
 
-    # --- Log utility ---
+    # --- Logging utility ---
     def log(msg):
         session.logger.log(msg)
         log_display.code(session.logger.get_log_text(), language="text")
 
-    # --- CLUSTERING RUN ---
+    # --- Clustering logic ---
     def run_clustering_pipeline():
         session.logger.clear()
         log("🔄 Starting clustering pipeline...")
@@ -194,8 +148,8 @@ def show_clustering_ui(step_index):
         try:
             with st.spinner("Running clustering..."):
                 clustered, overview, best_k, cost_dict, sil_dict, peak_k, shoulder_k, assignments = run_kprototypes_clustering(
-                    session.input_data,
-                    session.column_types,
+                    df,
+                    column_config,
                     k_range=(2, 30),
                     log_func=log
                 )
@@ -212,199 +166,209 @@ def show_clustering_ui(step_index):
             session.shoulder_k = shoulder_k
 
             log(f"🎉 Clustering complete. Best k = {best_k}")
-            st.session_state.kproto_step_success["Run Clustering"] = True
+            session.step_success["Run Clustering"] = True
+            session.step = "Review & Download"
 
         except Exception as e:
             log(f"❌ Clustering failed: {e}")
             st.error(f"Clustering failed: {e}")
+
         finally:
-            st.session_state.kproto_clustering_running = False
+            session.clustering_running = False
             st.rerun()
 
-    # --- Execute clustering if flagged ---
-    if st.session_state.kproto_clustering_running:
+    # --- Run if flagged ---
+    if session.clustering_running:
         run_clustering_pipeline()
 
-    # --- Top Button Area (always shown) ---
-    if st.button(" Run Clustering", use_container_width=True, type="primary", disabled=st.session_state.kproto_clustering_running, icon=":material/smart_toy:"):
-        st.session_state.kproto_clustering_running = True
+    # --- Run Button ---
+    if st.button(" Run Clustering", use_container_width=True, type="primary", disabled=session.clustering_running, icon=":material/smart_toy:"):
+        session.clustering_running = True
         st.rerun()
 
-    # --- Show Logs ---
+    # --- Show logs ---
     if session.logger.get_log_text():
         log_display.code(session.logger.get_log_text(), language="text")
 
-    # --- Trigger function for clarity ---
-    def _trigger_clustering():
-        st.session_state.kproto_clustering_running = True
-        st.rerun()
 
-
-def show_postprocessing_ui(step_index):
+def show_postprocessing_ui(session, step_index: int):
     import io, zipfile
     from datetime import datetime
 
-    navigation_bar(step_index)
-
-    if not st.session_state.kproto_sessions:
-        st.warning("No session found.")
-        return
-
-    session = st.session_state.kproto_sessions[-1]
+    navigation_bar(session, step_index)
 
     if not session.is_complete():
         st.warning("Clustering not yet completed.")
         return
 
-    # --- Header Stats ---
-    st.markdown("### Clustering Summary")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Peak k (max silhouette)", session.peak_k)
-    col2.metric("Shoulder k (≥ 0.5 silhouette)", session.shoulder_k)
-    col3.metric("Least cost k", session.selected_k)
+    session.step_success["Review & Download"] = True
 
-    # --- Plot Evaluation ---
-    fig = plot_kprototypes_results(
-        k_range=session.cost_per_k.keys(),
-        costs=session.cost_per_k,
-        silhouettes=session.silhouette_per_k,
-        peak_k=session.peak_k,
-        shoulder_k=session.shoulder_k
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # --------------------
+    # 1. Review Clustering
+    # --------------------
+    with st.expander(":material/analytics: Review Clustering Results", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Peak k (max silhouette)", session.peak_k)
+        col2.metric("Shoulder k (≥ 0.5 silhouette)", session.shoulder_k)
+        col3.metric("Least cost k", session.selected_k)
 
-    # --- Select alternative k (optional) ---
-    st.markdown("### Customize k")
-    st.markdown("Allows specification of custom k value. Set by default to peak k.")
-    available_ks = sorted(session.cost_per_k.keys())
-    suggested_k = session.peak_k or session.selected_k
-    selected_k = st.slider(
-        "Select k",
-        min_value=min(available_ks),
-        max_value=max(available_ks),
-        value=suggested_k,
-        key="custom_k_selection"
-    )
+        fig = plot_kprototypes_results(
+            k_range=session.cost_per_k.keys(),
+            costs=session.cost_per_k,
+            silhouettes=session.silhouette_per_k,
+            peak_k=session.peak_k,
+            shoulder_k=session.shoulder_k
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    # --- Regenerate data based on selected k ---
-    cluster_labels = session.get_assignments_for_k(selected_k)
-    df_clustered = session.input_data.copy()
-    df_clustered["cluster"] = cluster_labels
-    df_summary = df_clustered.groupby("cluster").agg(lambda x: x.mode().iloc[0] if not x.isnull().all() else None).reset_index()
-
-
-    # --- ZIP Download ---
-    st.markdown("### Download Cluster Results")
-    st.markdown("Download cluster results for selected k.")
-
-    col1, col2 = st.columns([3, 2])  # Adjust width ratio as needed
-
-    with col1:
-        format_choice = st.segmented_control(
-            label="Download Format",
-            options=["CSV", "XLSX"],
-            label_visibility="collapsed",
-            key="download_format",
-            selection_mode="single",
-            default="XLSX"
+        st.markdown("#### Customize k")
+        st.caption("Allows specification of a custom cluster count for final download and export. Defaults to peak k.")
+        available_ks = sorted(session.cost_per_k.keys())
+        default_k = session.peak_k or session.selected_k
+        selected_k = st.slider(
+            "Select k for export",
+            min_value=min(available_ks),
+            max_value=max(available_ks),
+            value=default_k,
+            key=f"custom_k_slider_{session.name}"
         )
 
+        cluster_labels = session.get_assignments_for_k(selected_k)
+        df_clustered = session.input_df.copy()
+        df_clustered["cluster"] = cluster_labels
+        df_summary = df_clustered.groupby("cluster").agg(
+            lambda x: x.mode().iloc[0] if not x.isnull().all() else None
+        ).reset_index()
 
-    # --- ZIP Download ---
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    buffer = io.BytesIO()
+        st.markdown("#### Cluster Summary Table")
+        st.dataframe(df_summary, use_container_width=True)
 
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-        if format_choice == "CSV":
-            zipf.writestr(f"cluster_overview_{timestamp}.csv", df_summary.to_csv(index=False))
-            zipf.writestr(f"clustered_data_{timestamp}.csv", df_clustered.to_csv(index=False))
-            zipf.writestr(f"original_data_{timestamp}.csv", session.input_data.to_csv(index=False))
-        else:
-            with io.BytesIO() as xlsx_buf:
-                with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as writer:
-                    df_summary.to_excel(writer, sheet_name="Cluster Overview", index=False)
-                    df_clustered.to_excel(writer, sheet_name="Clustered Data", index=False)
-                    session.input_data.to_excel(writer, sheet_name="Original Data", index=False)
-                zipf.writestr(f"clustering_output_{timestamp}.xlsx", xlsx_buf.getvalue())
+    # --------------------
+    # 2. Download Section
+    # --------------------
+    with st.expander(":material/download: Download Data"):
+        st.caption("Download clustered results, overview summary, and original input data.")
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            format_choice = st.segmented_control(
+                label="Format",
+                label_visibility="collapsed",
+                options=["CSV", "XLSX"],
+                selection_mode="single",
+                default="XLSX",
+                key=f"download_format_{session.name}"
+            )
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        buffer = io.BytesIO()
+
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+            if format_choice == "CSV":
+                zipf.writestr(f"cluster_overview_{timestamp}.csv", df_summary.to_csv(index=False))
+                zipf.writestr(f"clustered_data_{timestamp}.csv", df_clustered.to_csv(index=False))
+                zipf.writestr(f"original_data_{timestamp}.csv", session.input_df.to_csv(index=False))
+            else:
+                with io.BytesIO() as xlsx_buf:
+                    with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as writer:
+                        df_summary.to_excel(writer, sheet_name="Cluster Overview", index=False)
+                        df_clustered.to_excel(writer, sheet_name="Clustered Data", index=False)
+                        session.input_df.to_excel(writer, sheet_name="Original Data", index=False)
+                    zipf.writestr(f"clustering_output_{timestamp}.xlsx", xlsx_buf.getvalue())
+
+        with col2:
+            st.download_button(
+                label="Download ZIP",
+                data=buffer.getvalue(),
+                file_name=f"clustering_results_{timestamp}.zip",
+                mime="application/zip",
+                use_container_width=True,
+                icon=":material/download:"
+            )
+
+    # --------------------
+    # 3. Finalize & Export
+    # --------------------
+    with st.expander(":material/check_circle: Finalize and Continue", expanded=True):
+        st.markdown("Once finalized, this session becomes available to use in the Archetyper.")
+
+        available_regions = get_available_regions()
+        region = st.selectbox("Database region", available_regions)
+
+        if st.button("Finalize and Open in Archetyper", type="primary", use_container_width=True):
+            session.selected_k = selected_k
+            session.clustered_df = df_clustered
+            session.cluster_overview = df_summary
+            session.status = "finalized"
+
+            export_to_archetyper(session, region=region)
+            st.switch_page("archetyper/archetyper_ui.py")
+
+
+def render_sidebar_progress(session):
+    KPROTO_STEPS = ["Assign Column Types", "Run Clustering", "Review & Download"]
     
-    with col2:
-        st.download_button(
-            label="Download ZIP",
-            data=buffer.getvalue(),
-            file_name=f"clustering_results_{timestamp}.zip",
-            mime="application/zip",
-            use_container_width=True,
-            type="secondary",
-            icon=":material/download:"
+    with st.sidebar:
+        st.markdown(f":material/folder_open: Session :blue-background[{session.name}]")
+
+        total_steps = len(KPROTO_STEPS)
+        completed_steps = sum(session.step_success.get(step, False) for step in KPROTO_STEPS)
+        current_step = session.step
+
+        # Progress bar with dynamic label
+        st.progress(
+            completed_steps / total_steps,
+            text=f"{current_step}"
         )
-
     
-    # --- Finalize session ---
-    st.markdown("### Finalize Session")
-    st.markdown("Ends session. Finalized session data for the selected k is stored for the Archetyper wizard and remains availible to download from Your Data.")
-
-    if st.button("Finalize Session", icon=":material/check_circle:", type="primary", use_container_width=True):
-        # 1. Save selected k
-        session.selected_k = selected_k
-        session.clustered_data = df_clustered
-        session.cluster_overview = df_summary
-        session.status = "finalized"
-        
-        # 2. Confirm + cleanup + navigate
-        st.success(f"Session '{session.name}' finalized and saved.")
-        for key in list(st.session_state.keys()):
-            if key.startswith("kproto_") or key in ["upload_success", "column_assignment_success", "clustering_success"]:
-                del st.session_state[key]
-        st.switch_page("home_ui.py")
-
 
 # -------------------------------
-# Layout and Navigation
+# Page Layout
 # -------------------------------
 
-st.markdown(f"## K-Prototyper")
-step_index = KPROTO_STEPS.index(st.session_state.kproto_step)
+KPROTO_STEPS = ["Assign Column Types", "Run Clustering", "Review & Download"]
 
+def show_kprototyper_page():
+    st.markdown("## :material/smart_toy: K-Prototyper")
 
-# Render current step
+    # --- Top bar with session actions ---
+    t1, t2, t3 = st.columns(3)
+    with t1.popover("New", icon=":material/add:", use_container_width=True):
+        show_create_kprototyper_session_ui()
+    with t2.popover("Switch", icon=":material/menu_open:", use_container_width=True):
+        show_switch_kprototyper_session_ui()
+    with t3.popover("Manage", icon=":material/settings:", use_container_width=True):
+        show_manage_kprototyper_session_ui()
 
-step = st.session_state.kproto_step
-if step == "Upload":
-    show_upload_ui(step_index)
-elif step == "Assign Column Types":
-    show_column_typing_ui(step_index)
-elif step == "Run Clustering":
-    show_clustering_ui(step_index)
-elif step == "Review & Download":
-    show_postprocessing_ui(step_index)
+    # --- Guard clause: No session selected ---
+    active_key = st.session_state.get("kprototyper__active_key")
+    sessions = st.session_state.get("kprototyper__sessions", {})
+    if not active_key or active_key not in sessions:
+        st.info("No active session. Use the 'New' button above to create one.")
+        st.stop()
 
+    # --- Get current session and step ---
+    session = sessions[active_key]
+    render_sidebar_progress(session) 
+    step = session.step
 
-# Sidebar 
+    try:
+        step_index = KPROTO_STEPS.index(step)
+    except ValueError:
+        st.error(f"Unknown step: {step}")
+        return
 
-with st.sidebar:
-    st.markdown("### K-Prototyper Progress")
+    # --- Route to correct step UI ---
+    if step == "Assign Column Types":
+        show_column_typing_ui(session, step_index)
+    elif step == "Run Clustering":
+        show_clustering_ui(session, step_index)
+    elif step == "Review & Download":
+        show_postprocessing_ui(session, step_index)
+    else:
+        st.error(f"Unknown step: {step}")
 
-    total_steps = len(KPROTO_STEPS)
-    completed_steps = sum(
-        st.session_state.kproto_step_success.get(step, False) for step in KPROTO_STEPS
-    )
-    current_index = KPROTO_STEPS.index(st.session_state.kproto_step)
+    # --- Debug expander for session state ---
+    with st.expander("Debug", expanded=False):
+        show_debug_kprototyper_session_ui()
 
-    # Progress bar reflects % of completed steps
-    st.progress(completed_steps / total_steps, text=f"{completed_steps} of {total_steps} steps completed")
-
-    # Visual step list with emoji indicators
-    for i, step in enumerate(KPROTO_STEPS):
-        if st.session_state.kproto_step == step:
-            st.markdown(f":material/arrow_forward: **{step}**")
-        elif st.session_state.kproto_step_success.get(step):
-            st.markdown(f":material/check_box: {step}")
-        else:
-            st.markdown(f":material/check_box_outline_blank: {step}")
-
-    # Divider + Session Info
-    st.divider()
-    if "kproto_sessions" in st.session_state and st.session_state.kproto_sessions:
-        current_session = st.session_state.kproto_sessions[-1]
-        st.caption("**Session ID:**")
-        st.markdown(f":material/folder_open: `{current_session.name}`")
+show_kprototyper_page()
