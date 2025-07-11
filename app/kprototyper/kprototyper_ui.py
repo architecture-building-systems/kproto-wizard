@@ -19,11 +19,14 @@ from shared.utils import (
 
 from shared.utils_session import (
     init_kprototyper_state,
+    export_to_archetyper
+)
+
+from shared.utils_ui import (
     show_create_kprototyper_session_ui,
     show_switch_kprototyper_session_ui,
     show_manage_kprototyper_session_ui,
-    show_debug_kprototyper_session_ui,
-    export_to_archetyper
+    show_debug_kprototyper_session_ui
 )
 
 # -------------------------------
@@ -289,7 +292,7 @@ def show_postprocessing_ui(session, step_index: int):
     # 3. Finalize & Export
     # --------------------
     with st.expander(":material/check_circle: Finalize and Continue", expanded=True):
-        st.markdown("Once finalized, this session becomes available to use in the Archetyper.")
+        st.caption("Once finalized, this session becomes available to use in the Archetyper.")
 
         available_regions = get_available_regions()
         region = st.selectbox("Database region", available_regions)

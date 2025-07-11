@@ -178,6 +178,9 @@ def show_debug_panel(session):
 
     st.caption(f"Session key: `{normalize_session_key(session.name)}` | Region: `{session.region}`")
 
+def show_sidebar(session):
+    with st.sidebar:
+            st.markdown(f":material/folder_open: Session :blue-background[{session.name}]")
 
 # ---------- UI ----------
 
@@ -223,6 +226,8 @@ def show_archetyper_ui():
 
     with st.expander("Debug: Session State", expanded=False):
         show_debug_panel(active)
+
+    show_sidebar(active)
 
 # ---------- UI CALL ----------
 show_archetyper_ui()
