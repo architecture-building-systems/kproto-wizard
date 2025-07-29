@@ -13,7 +13,7 @@ def userdata_page():
     
     col1, col2 = st.columns([6, 1])
     col1.markdown("View active sessions and stored data.")
-    if col2.button("", key="refresh_your_data", help="Refresh", icon=":material/refresh:", use_container_width=True):
+    if col2.button("", key="refresh_user_data", help="Refresh", icon=":material/refresh:", use_container_width=True):
         st.rerun()
 
     # --- KPrototyper Sessions ---
@@ -52,9 +52,5 @@ def userdata_page():
                     st.success("Active Session")
     else:
         st.info("No Archetyper sessions found.")
-
-    st.divider()
-    if st.button(":material/refresh:", key="refresh_your_data", help="Refresh Page"):
-        st.rerun()
 
 userdata_page()

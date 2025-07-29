@@ -145,3 +145,17 @@ def export_to_archetyper(session: KPrototyperSession, region: str):
     )
 
     st.toast(f"Exported session '{session.name}' to Archetyper", icon=":material/package_2:")
+
+# -------------------------
+# Database Maker Session State
+# -------------------------
+
+def init_databasemaker_state(step_list):
+    st.session_state.setdefault("databasemaker__sessions", {})
+    st.session_state.setdefault("databasemaker__active_key", None)
+
+    # UI-specific session state
+    st.session_state.setdefault("databasemaker__step", step_list[0])
+    st.session_state.setdefault("databasemaker__step_success", {
+        step: False for step in step_list
+    })
