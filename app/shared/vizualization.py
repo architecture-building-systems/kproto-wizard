@@ -1,10 +1,47 @@
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+import pandas as pd
+import altair as alt
+
+import altair as alt
+import pandas as pd
+
+def visualize_column_data(dtype: str, column_data: pd.Series, col_name: str) -> alt.Chart:
+    column_data = column_data.dropna()
+
+    if dtype == "categorical":
+        counts = column_data.value_counts().reset_index()
+        counts.columns = ["value", "count"]
+        counts["column"] = col_name
+
+        chart = alt.Chart(counts).mark_bar().encode(
+            x=alt.X("count:Q", stack="zero", title=None),
+            y=alt.Y("column:N", title=None, axis=alt.Axis(labels=False)),
+            color=alt.Color("value:N",
+                sort=alt.EncodingSortField(field="count", op="sum", order="descending"),
+                legend=None
+            ),
+            tooltip=["value:N", "count:Q"]
+        ).properties(height=65)
+
+    elif dtype == "numerical":
+        df = pd.DataFrame({"value": column_data, "column": col_name})
+        chart = alt.Chart(df).mark_boxplot(extent="min-max", ticks=False).encode(
+            x=alt.X("value:Q", title=None),
+            y=alt.Y("column:N", title=None, axis=alt.Axis(labels=False))
+        ).properties(height=75)
+
+    else:
+        # Return an invisible placeholder
+        chart = alt.Chart(pd.DataFrame({"x": [], "y": []})).mark_point()
+
+    return chart.configure_view(stroke=None)
+
 
 def plot_kprototypes_results(
     k_range, costs, silhouettes, peak_k=None, shoulder_k=None,
-    title='K-Prototypes Evaluation', threshold=0.5, width=1000, height=600
+    title='K-Prototypes Evaluation', threshold=0.5, width=400, height=400
 ):
     x_vals = list(k_range)
     cost_vals = [costs.get(k, None) for k in x_vals]

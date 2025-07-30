@@ -370,145 +370,44 @@ def show_debug_databasemaker_session_ui():
 
     session = sessions[active_key]
 
+    st.subheader("Databasemaker Debug Log")
+    st.code(session.logger.get_log_text() or "No log entries.", language="text")
+
+    def safe_preview(df, rows=3):
+        return df.head(rows).to_dict() if isinstance(df, pd.DataFrame) else None
+
+    st.subheader("Databasemaker Session Debug Info")
+
     st.json({
-        "name": session.name,
-        "region": session.region,
-        "step": session.step,
-        "step_success": session.step_success,
-        "column_types": session.column_types,
-        "feature_map": session.feature_map,
-        "selected_k": session.selected_k,
-        "clustered_df_preview": session.clustered_df.head().to_dict() if session.clustered_df is not None else None,
-        "DB0_tables": list(session.DB0.keys()) if session.DB0 else None,
-        "DB1_ready": session.download_ready,
+        "meta": {
+            "name": session.name,
+            "region": session.region,
+            "step": session.step,
+            "step_success": session.step_success,
+            "selected_k": session.selected_k,
+        },
+        "column_mappings": {
+            "feature_map": session.feature_map,
+            "column_types": session.column_types,
+        },
+        "clustering": {
+            "clustered_df_preview": safe_preview(session.clustered_df),
+            "cluster_overview_preview": safe_preview(session.cluster_overview),
+            "cost_per_k": session.cost_per_k,
+            "silhouette_per_k": session.silhouette_per_k,
+            "peak_k": session.peak_k,
+            "shoulder_k": session.shoulder_k,
+        },
+        "database_state": {
+            "DB0_tables": list(session.DB0.keys()) if session.DB0 else [],
+            "DB_cluster_tables": list(session.DB_cluster.keys()) if session.DB_cluster else [],
+            "DB_override_tables": list(session.DB_override.keys()) if session.DB_override else [],
+            "DB1_ready": session.download_ready,
+        },
+        "construction_types_tables": {
+            "DB0": safe_preview(session.DB0.get("construction_types")),
+            "DB_cluster": safe_preview(session.DB_cluster.get("construction_types")),
+            "DB_override": safe_preview(session.DB_override.get("construction_types")),
+            "DB1": safe_preview(session.DB1.get("construction_types")) if session.DB1 else None,
+        }
     })
-
-def show_table_edit_ui(
-    table_key: str,
-    schema: dict,
-    session,
-    default_prefill_table: pd.DataFrame,
-    title: str = "",
-    description: str = "",
-    step_index: int = None,
-    step_list: list[str] = None
-):
-    cluster_count = len(session.cluster_overview)
-    should_rebuild = False
-
-    if table_key not in session.DB_modified:
-        should_rebuild = True
-    else:
-        existing_df = session.DB_modified[table_key]
-        if len(existing_df) != cluster_count:
-            should_rebuild = True
-
-    if should_rebuild:
-        mapped_columns = [col for col in session.feature_map.values() if col != "None"]
-        summary_df = session.cluster_overview.copy()
-        summary_df["const_type"] = [f"CLUSTER_{i}" for i in summary_df.index]
-        summary_df["description"] = ["" for _ in summary_df.index]
-        summary_df["reference"] = [
-            json.dumps({col: "cluster" if col in mapped_columns else "empty" for col in schema})
-            for _ in summary_df.index
-        ]
-        for col in schema:
-            if col not in summary_df.columns:
-                summary_df[col] = ""
-        summary_df = summary_df[[col for col in schema] + ["reference"]]
-        session.DB_modified[table_key] = summary_df
-
-    session.DB_modified[table_key] = session.DB_modified[table_key].reset_index(drop=True)
-    df_mod = session.DB_modified[table_key]
-    updated_rows = []
-    validation_errors = {}
-
-    # if title:
-    #     st.markdown(f"##### :material/factory: {title}")
-    # if description:
-    #     st.caption(description)
-
-    for i, row in df_mod.iterrows():
-        row_id = row.name
-        st.markdown(f"###### {title or table_key} Cluster {i}")
-        ref_dict = json.loads(row["reference"])
-        editable_row = pd.DataFrame([row.drop("reference")]).reset_index(drop=True)
-
-        # --- Prefill dropdown + apply button ---
-        c1, c2 = st.columns([4,2])
-
-        # --- Prefill dropdown
-        with c1:
-            prefill_key = f"default_select_{table_key}_{row_id}"
-            selected_default = st.selectbox(
-                label=f"Prefill missing values from:",
-                options=["None"] + list(default_prefill_table["const_type"]),
-                key=prefill_key,
-                label_visibility="collapsed"
-            )
-        
-        # --- Prefill key
-        with c2:
-            apply_prefill_key = f"apply_prefill_{table_key}_{row_id}"
-            if st.button("Apply Prefill", key=apply_prefill_key, use_container_width=True):
-                if selected_default != "None" and selected_default in default_prefill_table["const_type"].values:
-                    default_row = default_prefill_table[default_prefill_table["const_type"] == selected_default].iloc[0]
-                    for col in schema:
-                        if col in editable_row.columns and editable_row.at[0, col] in [None, "", "nan", "NaN"]:
-                            editable_row.at[0, col] = str(default_row[col])
-                            ref_dict[col] = "database"
-
-        # --- Column config (simplified, no icons or types)
-        column_config = {}
-        for col in editable_row.columns:
-            options = get_dropdown_options_for_field(session, col, schema)
-            if options:
-                column_config[col] = st.column_config.SelectboxColumn(
-                    label=col,
-                    options=options,
-                    required=False
-                )
-            else:
-                column_config[col] = st.column_config.TextColumn(label=col)
-
-        edited = st.data_editor(
-            editable_row,
-            num_rows="fixed",
-            column_config=column_config,
-            use_container_width=True,
-            key=f"editable_row_{table_key}_{row_id}"
-        ).reset_index(drop=True)
-
-        row_dict = edited.iloc[0].to_dict()
-        new_ref = {}
-        for col, new_val in row_dict.items():
-            old_val = row.get(col)
-            new_ref[col] = "user" if new_val != old_val else ref_dict.get(col, "cluster")
-
-        edited["reference"] = json.dumps(new_ref)
-        updated_rows.append(edited.iloc[0])
-
-    # --- Save button & deferred validation ---
-    if st.button(f"Save {title or table_key}", type="primary", use_container_width=True, key=f"save_button_{table_key}"):
-        final_df = pd.DataFrame(updated_rows).reset_index(drop=True)
-        session.DB_modified[table_key] = final_df
-
-        for i, row in final_df.iterrows():
-            errors = []
-            for col in schema:
-                val = row[col]
-                if not validate_field_value(val, col, schema, session):
-                    errors.append(f"`{col}` has invalid value: `{val}`")
-            if not row["const_type"] or not row["description"]:
-                errors.append("Missing required `const_type` or `description`")
-            if errors:
-                validation_errors[i] = errors
-
-        if not validation_errors:
-            if step_index is not None and step_list is not None:
-                session.step_success[step_list[step_index]] = True
-            st.success(f"✅ All entries in {title or table_key} saved and validated.")
-        else:
-            st.markdown("### :red[Validation Errors]")
-            for i, errs in validation_errors.items():
-                st.error(f"Cluster {i}:\n" + "\n".join(errs))

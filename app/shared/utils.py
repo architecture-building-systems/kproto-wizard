@@ -390,4 +390,3 @@ def validate_full_database(
                 all_errors[table_name] = errors
 
     return all_errors
-

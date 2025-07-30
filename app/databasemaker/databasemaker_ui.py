@@ -25,8 +25,7 @@ from shared.utils_ui import (
     show_create_databasemaker_session_ui,
     show_switch_databasemaker_session_ui,
     show_manage_databasemaker_session_ui,
-    show_debug_databasemaker_session_ui,
-    show_table_edit_ui
+    show_debug_databasemaker_session_ui
 )
 
 from shared.clustering import (
@@ -35,7 +34,13 @@ from shared.clustering import (
 )
 
 from shared.vizualization import (
+    visualize_column_data,
     plot_kprototypes_results
+)
+
+from shared.utils_database import (
+    compute_final_df,
+    highlight_cells_by_reference
 )
 
 # --------------------------------------------------------------------------------------
@@ -52,7 +57,7 @@ def navigation_bar(session, step_index: int, step_list: list[str]):
     current_step = step_list[step_index]
     progress_state = session.step_success.get(current_step, False)
 
-    cols = st.columns([4, 1, 1])
+    cols = st.columns([5, 1, 1])
     with cols[0]:
         st.markdown(f"#### Step {step_index + 1}: {current_step}")
     if step_index > 0 and cols[1].button("← Back", use_container_width=True):
@@ -105,8 +110,15 @@ def show_column_mapping_ui(session, step_index: int, step_list: list[str]):
         if "name" in inferred:
             inferred["name"] = "off"
         session.column_types = inferred
-        session.column_metadata = {
+        session.input_column_metadata = {
             col["name"]: (col["dtype"], col["unique"]) for col in metadata["column_summary"]
+        }
+        session.column_metadata = {
+            col: (
+                schema["source_table"] if "source_table" in schema else "construction_types",
+                schema.get("validator")
+            )
+            for col, schema in CONSTRUCTION_TYPE_SCHEMA.items()
         }
 
     if session.feature_map is None:
@@ -139,45 +151,47 @@ def show_column_mapping_ui(session, step_index: int, step_list: list[str]):
             st.rerun()
 
     # --- Table Header ---
-    h1, h2, h3, h4, h5 = st.columns([2, 1, 1, 2, 3])
-    h1.markdown("**Input Column**")
-    h2.markdown("**Dtype**")
-    h3.markdown("**Unique**")
-    h4.markdown("**Map to DB**")
-    h5.markdown("**Assign Type**")
+    h1, h2, h3 = st.columns([2, 4, 4])
+    h1.markdown("Input Column")
+    h2.markdown("Data Type")
+    h3.markdown("Database Mapping")
 
     # --- Table Rows ---
     for col in df.columns:
-        dtype, n_unique = session.column_metadata.get(col, ("unknown", "?"))
-        default_type = session.column_types.get(col, "off")
-        default_map = session.feature_map.get(col, "None")
+        with st.container(border=True):
+            dtype, n_unique = session.column_metadata.get(col, ("unknown", "?"))
+            default_type = session.column_types.get(col, "off")
+            default_map = session.feature_map.get(col, "None")
 
-        c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 2, 3])
-        with c1:
-            st.markdown(f"**{col}**")
-        with c2:
-            st.markdown(f"`{dtype}`")
-        with c3:
-            st.markdown(f"`{n_unique}`")
-        with c4:
-            session.feature_map[col] = st.selectbox(
-                "Map to",
-                cea_columns,
-                index=cea_columns.index(default_map) if default_map in cea_columns else 0,
-                key=f"map_{col}",
-                label_visibility="collapsed"
-            )
-        with c5:
-            session.column_types[col] = st.segmented_control(
-                label="Type",
-                label_visibility="collapsed",
-                options=["categorical", "numerical", "off"],
-                selection_mode="single",
-                default=default_type,
-                format_func=lambda x: x,
-                key=f"type_{col}",
-                disabled=(col == "name")
-            )
+            c1, c2, c3 = st.columns([2, 4, 4])
+            with c1:
+                st.markdown(f"**{col}**")
+            with c3:
+                session.feature_map[col] = st.selectbox(
+                    "Map to",
+                    cea_columns,
+                    index=cea_columns.index(default_map) if default_map in cea_columns else 0,
+                    key=f"map_{col}",
+                    label_visibility="collapsed",
+                    
+                )
+            with c2:
+                session.column_types[col] = st.segmented_control(
+                    label="Type",
+                    label_visibility="collapsed",
+                    options=["categorical", "numerical", "off"],
+                    selection_mode="single",
+                    default=default_type,
+                    format_func=lambda x: x,
+                    key=f"type_{col}",
+                    disabled=(col == "name")
+                )
+
+            # --- Chart below row ---
+            col_data = df[col]
+            col_dtype = session.column_types.get(col, "off")
+            chart = visualize_column_data(col_dtype, col_data, col_name=col)
+            st.altair_chart(chart, use_container_width=True)
 
 
 def show_clustering_ui(session, step_index: int, step_list: list[str]):
@@ -224,8 +238,9 @@ def show_clustering_ui(session, step_index: int, step_list: list[str]):
             )
             session.peak_k = peak_k
             session.shoulder_k = shoulder_k
+            session.best_k = best_k
 
-            log(f"🎉 Clustering complete. Best k = {best_k}")
+            log(f"🎉 Clustering complete. Least cost k = {best_k}")
 
             session.step_success[step_list[step_index]] = True
             session.step = step_list[step_index + 1]  # Move to next step
@@ -262,11 +277,24 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
     current_step = step_list[step_index]
     session.step_success[current_step] = True  # mark this step complete
 
-    with st.expander(":material/analytics: Review Clustering Results", expanded=True):
+    with st.container(border=True):
+        st.markdown("Customize construction typology count by selecting k value. Defaults to peak k.")
+        available_ks = sorted(session.cost_per_k.keys())
+        default_k = session.peak_k or session.best_k
+        selected_k = st.slider(
+            "Select k",
+            min_value=min(available_ks),
+            max_value=max(available_ks),
+            value=default_k,
+            key=f"custom_k_slider_{session.name}"
+        )
+
+
+    with st.expander(":material/analytics: Clustering Results", expanded=True):
         col1, col2, col3 = st.columns(3)
         col1.metric("Peak k (max silhouette)", session.peak_k)
         col2.metric("Shoulder k (≥ 0.5 silhouette)", session.shoulder_k)
-        col3.metric("Least cost k", session.selected_k)
+        col3.metric("Least cost k", session.best_k)
 
         fig = plot_kprototypes_results(
             k_range=session.cost_per_k.keys(),
@@ -277,33 +305,31 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("#### Customize k")
-        st.caption("Allows you to reselect a k value. Defaults to peak k.")
-        available_ks = sorted(session.cost_per_k.keys())
-        default_k = session.peak_k or session.selected_k
-        selected_k = st.slider(
-            "Select k",
-            min_value=min(available_ks),
-            max_value=max(available_ks),
-            value=default_k,
-            key=f"custom_k_slider_{session.name}"
-        )
-
         try:
             cluster_labels = session.get_assignments_for_k(selected_k)
         except ValueError as e:
             st.error(str(e))
             return
 
+    with st.expander(":material/table: Cluster Summary Table", expanded=True):
         df_clustered = session.X0.copy()
         df_clustered["cluster"] = cluster_labels
         df_summary = df_clustered.groupby("cluster").agg(
             lambda x: x.mode().iloc[0] if not x.isnull().all() else None
         ).reset_index()
 
+        # Fully reset cluster-dependent parts of the session
         session.selected_k = selected_k
         session.clustered_df = df_clustered
         session.cluster_overview = df_summary
+
+        session.DB_cluster = {}
+        session.DB_override = {}
+        session.DB1 = None
+        session.download_ready = False
+
+        session.populate_DB_cluster()
+        session.initialize_DB_override()
 
         st.markdown("#### Cluster Summary Table")
         st.dataframe(df_summary, use_container_width=True)
@@ -312,47 +338,121 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
 def show_review_database_ui(session, step_index: int, step_list: list[str]):
     navigation_bar(session, step_index, step_list)
 
-    table_key = "construction_types"
-    schema = CONSTRUCTION_TYPE_SCHEMA
+    table = "construction_types"
+    cluster_df = session.DB_cluster.get(table)
+    override_df = session.DB_override.get(table)
+    baseline_df = session.DB0.get(table)
+    
+    if cluster_df is None or override_df is None or baseline_df is None:
+        if cluster_df is None:
+            st.warning("Missing required  tables for editing: cluster_df")
+            return
+        if override_df is None:
+            st.warning("Missing required  tables for editing: override_df")
+            return
+        if baseline_df is None:
+            st.warning("Missing required  tables for editing: baseline_df")
+            return
+    
+    if "construction_types" not in session.DB_cluster or session.DB_cluster["construction_types"].empty:
+        st.info("Your clustering results did not populate any construction type features. "
+                "You can still manually assign values or copy from the baseline database for each construction type.")
+        return
 
-    # --- Initialize modified construction_types table if missing ---
-    if table_key not in session.DB_modified:
-        base_df = session.DB0["construction_types"]
-        mapped_columns = [col for col in session.feature_map.values() if col != "None"]
+    # Compute final merged DB1 table
+    final_df = compute_final_df(cluster_df, override_df)
 
-        summary_df = session.cluster_overview.copy()
-        summary_df["const_type"] = [f"CLUSTER_{i}" for i in summary_df.index]
-        summary_df["description"] = ["" for _ in summary_df.index]
-        summary_df["reference"] = [
-            json.dumps({col: "cluster" if col in mapped_columns else "empty" for col in schema})
-            for _ in summary_df.index
-        ]
+    # --- Section 1: Read-only overview ---
+    st.subheader("Current Table Overview")
+    styled = highlight_cells_by_reference(final_df)
+    st.dataframe(styled, use_container_width=True)
 
-        # Ensure all expected schema columns exist
-        for col in schema:
-            if col not in summary_df.columns:
-                summary_df[col] = None
+    # --- Section 2: Row-level editor ---
+    st.subheader("Edit Individual Row")
+    row_id = st.selectbox("Select a row to edit:", override_df.index)
 
-        summary_df = summary_df[[col for col in schema] + ["reference"]]
-        session.DB_modified[table_key] = summary_df
+    baseline_choice = st.selectbox("Auto-fill empty values from baseline row:", baseline_df.index, key=f"baseline_{row_id}")
+    if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}"):
+        for col in override_df.columns:
+            if col == "Reference":
+                continue
+            cluster_locked = not pd.isna(cluster_df.at[row_id, col])
+            already_overridden = not pd.isna(override_df.at[row_id, col])
+            if not cluster_locked and not already_overridden:
+                override_df.at[row_id, col] = baseline_df.at[baseline_choice, col]
+                ref = json.loads(override_df.at[row_id, "Reference"] or "{}")
+                ref[col] = "database"
+                override_df.at[row_id, "Reference"] = json.dumps(ref)
+        st.rerun()
 
-    df_mod = session.DB_modified[table_key]
-    default_df = session.DB0["construction_types"]
-    updated_rows = []
-    validation_errors = {}
+    # --- Section 3: Modal editor for full table ---
+    @st.dialog("Edit Entire Construction Types Table")
+    def edit_full_table():
+        edited = st.data_editor(override_df, use_container_width=True, num_rows="dynamic")
+        if st.button("Save changes"):
+            for col in edited.columns:
+                if col == "Reference":
+                    continue
+                for idx in edited.index:
+                    override_df.at[idx, col] = edited.at[idx, col]
+                    ref = json.loads(override_df.at[idx, "Reference"] or "{}")
+                    ref[col] = "user"
+                    override_df.at[idx, "Reference"] = json.dumps(ref)
+            st.rerun()
+
+    if st.button("Open full table editor"):
+        edit_full_table()
+
+    # --- Section 4: Final merged table preview ---
+    st.subheader("Final Merged Table for Export")
+    final_df = compute_final_df(cluster_df, override_df)
+    st.dataframe(final_df, use_container_width=True)
+
+# def show_review_database_ui(session, step_index: int, step_list: list[str]):
+#     navigation_bar(session, step_index, step_list)
+
+#     table_key = "construction_types"
+#     schema = CONSTRUCTION_TYPE_SCHEMA
+
+#     # --- Initialize modified construction_types table if missing ---
+#     if table_key not in session.DB_modified:
+#         base_df = session.DB0["construction_types"]
+#         mapped_columns = [col for col in session.feature_map.values() if col != "None"]
+
+#         summary_df = session.cluster_overview.copy()
+#         summary_df["const_type"] = [f"CLUSTER_{i}" for i in summary_df.index]
+#         summary_df["description"] = ["" for _ in summary_df.index]
+#         summary_df["reference"] = [
+#             json.dumps({col: "cluster" if col in mapped_columns else "empty" for col in schema})
+#             for _ in summary_df.index
+#         ]
+
+#         # Ensure all expected schema columns exist
+#         for col in schema:
+#             if col not in summary_df.columns:
+#                 summary_df[col] = None
+
+#         summary_df = summary_df[[col for col in schema] + ["reference"]]
+#         session.DB_modified[table_key] = summary_df
+
+#     df_mod = session.DB_modified[table_key]
+#     default_df = session.DB0["construction_types"]
+#     updated_rows = []
+#     validation_errors = {}
 
 
-    with st.expander("Construction Types"):
-        show_table_edit_ui(
-            table_key="construction_types",
-            schema=CONSTRUCTION_TYPE_SCHEMA,
-            session=session,
-            default_prefill_table=session.DB0["construction_types"],
-            title="Construction Types",
-            description="Each row corresponds to one cluster. You may prefill values from a default construction type or edit manually.",
-            step_index=step_index,
-            step_list=step_list
-        )
+#     with st.expander("Construction Types"):
+#         show_table_edit_ui(
+#             table_key="construction_types",
+#             schema=CONSTRUCTION_TYPE_SCHEMA,
+#             session=session,
+#             default_prefill_table=session.DB0["construction_types"],
+#             title="Construction Types",
+#             description="Each row corresponds to one cluster. You may prefill values from a default construction type or edit manually.",
+#             step_index=step_index,
+#             step_list=step_list
+#         )
+
 
 def show_download_database_ui(session, step_index: int, step_list: list[str]):
     navigation_bar(session, step_index, step_list)
