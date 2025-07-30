@@ -6,6 +6,9 @@ from datetime import datetime
 import io
 import zipfile
 import re
+import tempfile
+import shutil
+import os
 
 from archetyper.session import ArchetyperSession
 
@@ -110,7 +113,7 @@ def load_default_database_for_region(region: str, db_base_path: Path = Path("app
 
     return db
 
-def export_database_to_directory(db: dict[str, pd.DataFrame], output_path: Path) -> None:
+def export_database_to_directory(db: dict[str, pd.DataFrame], output_path: Path | str) -> None:
     """
     Exports a database dictionary to the correct CEA directory layout as CSV files.
     
@@ -118,6 +121,9 @@ def export_database_to_directory(db: dict[str, pd.DataFrame], output_path: Path)
     - db: dict mapping table names to dataframes
     - output_path: base folder to save all CSVs in CEA-style subfolders
     """
+    # If output path is string
+    output_path = Path(output_path)
+
     # Define folder mapping for each table group
     folder_map = {
         # Archetype core tables
@@ -180,32 +186,32 @@ def export_database_to_directory(db: dict[str, pd.DataFrame], output_path: Path)
         else:
             print(f"[export_database_to_directory] Warning: No export path defined for table '{table_name}'")
 
-def export_database_to_zip(database: dict[str, pd.DataFrame], zip_name_prefix="cea_modified") -> io.BytesIO:
+
+def export_database_to_zip(db1: dict) -> io.BytesIO:
     """
-    Exports a dictionary of dataframes into a CEA-compatible zip structure.
-    Returns a BytesIO buffer ready for download.
+    Export a structured CEA-style database to a zip archive.
+    All folder structure is preserved according to export_database_to_directory.
+
+    Parameters:
+    - db1: dict[str, pd.DataFrame] — final merged database (DB1)
+
+    Returns:
+    - BytesIO zip stream ready for download
     """
-    buffer = io.BytesIO()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_buffer = io.BytesIO()
 
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for table_name, df in database.items():
-            if not isinstance(df, pd.DataFrame):
-                continue
+    with tempfile.TemporaryDirectory() as tmpdir:
+        export_database_to_directory(db1, tmpdir)  # builds correct folder structure
 
-            # Construct logical output path
-            if table_name == "construction_types":
-                csv_path = f"{zip_name_prefix}/ARCHETYPES/CONSTRUCTION/CONSTRUCTION_TYPES.csv"
-            else:
-                csv_path = f"{zip_name_prefix}/{table_name.upper()}.csv"
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(tmpdir):
+                for file in files:
+                    filepath = os.path.join(root, file)
+                    arcname = os.path.relpath(filepath, tmpdir)  # preserve folder path
+                    zipf.write(filepath, arcname)
 
-            zipf.writestr(csv_path, df.to_csv(index=False))
-
-        # Optional: add metadata file
-        zipf.writestr(f"{zip_name_prefix}/info.txt", f"Exported on {timestamp}")
-
-    buffer.seek(0)
-    return buffer
+    zip_buffer.seek(0)
+    return zip_buffer
 
 # -------------------------
 # Database Value Retrieval
@@ -278,18 +284,31 @@ def validate_code_ref(value, meta, session) -> bool:
         return False
     return value in df["code"].values
 
+
 def validate_numeric_range(value, meta, session=None) -> bool:
     """
     Validates a numeric value against its min/max bounds (inclusive).
     """
-    if value is None or not isinstance(value, (int, float)):
-        return False
     v = meta.get("validation", {})
-    if "min" in v and value < v["min"]:
+    min_val = v.get("min", float("-inf"))
+    max_val = v.get("max", float("inf"))
+
+    try:
+        num = float(value)
+    except Exception as e:
+        print(f"[validate_numeric_range] Invalid numeric conversion for value: {value} — {e}")
         return False
-    if "max" in v and value > v["max"]:
+
+    if num < min_val:
+        print(f"[validate_numeric_range] {num} < min {min_val}")
         return False
+    if num > max_val:
+        print(f"[validate_numeric_range] {num} > max {max_val}")
+        return False
+
+    print(f"[validate_numeric_range] {num} is valid within [{min_val}, {max_val}]")
     return True
+
 
 def validate_day_month_string(value, meta, session=None) -> bool:
     """
@@ -302,6 +321,7 @@ def validate_day_month_string(value, meta, session=None) -> bool:
         return False
     day, month = int(match.group(1)), int(match.group(2))
     return 1 <= day <= 31 and 1 <= month <= 12
+
 
 def validate_field_value(value, col, schema, session=None):
     meta = schema.get(col)

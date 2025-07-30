@@ -30,16 +30,16 @@ CONSTRUCTION_TYPE_SCHEMA = {
     "year_start": {
         "type": "int",
         "validation": {
-            "min": 1000,
-            "max": 2100
+            "min": 0,
+            "max": 10000
         },
         "validator": validate_numeric_range
     },
     "year_end": {
         "type": "int",
         "validation": {
-            "min": 1000,
-            "max": 2100,
+            "min": 0,
+            "max": 10000,
             "validator": validate_numeric_range
         }
     },
@@ -108,7 +108,7 @@ CONSTRUCTION_TYPE_SCHEMA = {
     },
     "void_deck": {
         "type": "int",
-        "validation": {"min": 0},
+        "validation": {"min": 0, "max": 1},
         "validator": validate_numeric_range
     },
     "wwr_north": {

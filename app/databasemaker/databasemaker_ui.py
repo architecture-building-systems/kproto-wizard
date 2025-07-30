@@ -40,7 +40,9 @@ from shared.vizualization import (
 
 from shared.utils_database import (
     compute_final_df,
-    highlight_cells_by_reference
+    highlight_cells_by_reference,
+    get_baseline_labels,
+    get_validation_map_from_schema
 )
 
 # --------------------------------------------------------------------------------------
@@ -336,28 +338,44 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
 
 
 def show_review_database_ui(session, step_index: int, step_list: list[str]):
+    from shared.constants import CONSTRUCTION_TYPE_SCHEMA
+
     navigation_bar(session, step_index, step_list)
 
+    # Assign tables
     table = "construction_types"
     cluster_df = session.DB_cluster.get(table)
     override_df = session.DB_override.get(table)
     baseline_df = session.DB0.get(table)
-    
+
     if cluster_df is None or override_df is None or baseline_df is None:
-        if cluster_df is None:
-            st.warning("Missing required  tables for editing: cluster_df")
-            return
-        if override_df is None:
-            st.warning("Missing required  tables for editing: override_df")
-            return
-        if baseline_df is None:
-            st.warning("Missing required  tables for editing: baseline_df")
-            return
-    
-    if "construction_types" not in session.DB_cluster or session.DB_cluster["construction_types"].empty:
-        st.info("Your clustering results did not populate any construction type features. "
-                "You can still manually assign values or copy from the baseline database for each construction type.")
+        st.warning("Missing required tables for editing.")
         return
+
+    # Create validation map from schema
+    validation_map = get_validation_map_from_schema({
+        "construction_types": CONSTRUCTION_TYPE_SCHEMA
+    })
+
+    # --- Section 0: Validate + Save Button ---
+    st.subheader("Finalize Construction Types Table")
+    if st.button("Validate and Save", type="primary"):
+        validation_errors = session.validate_DB_override(validation_map)
+        if validation_errors:
+            st.error("Validation failed. Please correct the highlighted issues.")
+            for (table, row, col), msg in validation_errors.items():
+                st.markdown(f"- **{table}**, row `{row}`, column `{col}`: {msg}")
+        else:
+            session.compute_DB1()
+            session.download_ready = True
+
+            current_step = step_list[step_index]
+            next_step = step_list[step_index + 1] if step_index + 1 < len(step_list) else None
+            session.step_success[current_step] = True
+            session.step = next_step
+
+            st.success("Validation passed. Database saved and ready for download.")
+            st.rerun()
 
     # Compute final merged DB1 table
     final_df = compute_final_df(cluster_df, override_df)
@@ -371,7 +389,12 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
     st.subheader("Edit Individual Row")
     row_id = st.selectbox("Select a row to edit:", override_df.index)
 
-    baseline_choice = st.selectbox("Auto-fill empty values from baseline row:", baseline_df.index, key=f"baseline_{row_id}")
+    baseline_labels = get_baseline_labels(baseline_df, label_field="description")
+    selected_baseline = st.selectbox(
+        "Auto-fill empty values from baseline row:",
+        options=baseline_df.index,
+        format_func=lambda idx: baseline_labels.get(idx, str(idx))
+    )
     if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}"):
         for col in override_df.columns:
             if col == "Reference":
@@ -379,7 +402,7 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
             cluster_locked = not pd.isna(cluster_df.at[row_id, col])
             already_overridden = not pd.isna(override_df.at[row_id, col])
             if not cluster_locked and not already_overridden:
-                override_df.at[row_id, col] = baseline_df.at[baseline_choice, col]
+                override_df.at[row_id, col] = baseline_df.at[selected_baseline, col]
                 ref = json.loads(override_df.at[row_id, "Reference"] or "{}")
                 ref[col] = "database"
                 override_df.at[row_id, "Reference"] = json.dumps(ref)
@@ -408,73 +431,33 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
     final_df = compute_final_df(cluster_df, override_df)
     st.dataframe(final_df, use_container_width=True)
 
-# def show_review_database_ui(session, step_index: int, step_list: list[str]):
-#     navigation_bar(session, step_index, step_list)
-
-#     table_key = "construction_types"
-#     schema = CONSTRUCTION_TYPE_SCHEMA
-
-#     # --- Initialize modified construction_types table if missing ---
-#     if table_key not in session.DB_modified:
-#         base_df = session.DB0["construction_types"]
-#         mapped_columns = [col for col in session.feature_map.values() if col != "None"]
-
-#         summary_df = session.cluster_overview.copy()
-#         summary_df["const_type"] = [f"CLUSTER_{i}" for i in summary_df.index]
-#         summary_df["description"] = ["" for _ in summary_df.index]
-#         summary_df["reference"] = [
-#             json.dumps({col: "cluster" if col in mapped_columns else "empty" for col in schema})
-#             for _ in summary_df.index
-#         ]
-
-#         # Ensure all expected schema columns exist
-#         for col in schema:
-#             if col not in summary_df.columns:
-#                 summary_df[col] = None
-
-#         summary_df = summary_df[[col for col in schema] + ["reference"]]
-#         session.DB_modified[table_key] = summary_df
-
-#     df_mod = session.DB_modified[table_key]
-#     default_df = session.DB0["construction_types"]
-#     updated_rows = []
-#     validation_errors = {}
-
-
-#     with st.expander("Construction Types"):
-#         show_table_edit_ui(
-#             table_key="construction_types",
-#             schema=CONSTRUCTION_TYPE_SCHEMA,
-#             session=session,
-#             default_prefill_table=session.DB0["construction_types"],
-#             title="Construction Types",
-#             description="Each row corresponds to one cluster. You may prefill values from a default construction type or edit manually.",
-#             step_index=step_index,
-#             step_list=step_list
-#         )
-
 
 def show_download_database_ui(session, step_index: int, step_list: list[str]):
     navigation_bar(session, step_index, step_list)
 
-    # --- Preview modified construction types ---
-    st.markdown("###### :material/table: Construction Types")
-    st.caption("Final construction types table with typologies defined by clusters")
-    if "construction_types" in session.DB_modified:
-        st.dataframe(session.DB_modified["construction_types"], use_container_width=True)
-    else:
-        st.warning("No construction types available.")
+    st.title("Download Final Database")
+
+    if not session.download_ready or session.DB1 is None:
+        st.warning("Database has not yet been finalized. Please return to the previous step to validate and save.")
         return
 
-    # --- Download database as ZIP, training data---
-    st.markdown("###### :material/download: Downloads")
-    st.caption("Download complete CEA database and training data with clusters appended")
-    zip_buffer = export_database_to_zip(session.DB_modified)
+    # --- Preview final construction types ---
+    st.markdown("### :material/table: Construction Types")
+    st.caption("Final construction types table with typologies defined by clusters and/or user edits")
+    if "construction_types" in session.DB1:
+        st.dataframe(session.DB1["construction_types"], use_container_width=True)
+    else:
+        st.warning("No construction_types table found in the final database.")
 
+    # --- Download database as ZIP ---
+    st.markdown("### :material/download: Downloads")
+    st.caption("Download complete CEA-compatible database and clustered training data")
+
+    zip_buffer = export_database_to_zip(session.DB1)
     st.download_button(
-        label="Download ZIP (Modified CEA Database)",
+        label="Download ZIP (Final CEA Database)",
         data=zip_buffer.getvalue(),
-        file_name="cea_modified_database.zip",
+        file_name=f"{session.name}_cea_database.zip",
         mime="application/zip",
         use_container_width=True,
         type="primary"
@@ -488,7 +471,7 @@ def show_download_database_ui(session, step_index: int, step_list: list[str]):
         st.download_button(
             label="Download Clustered Training Set (CSV)",
             data=csv_buf.getvalue(),
-            file_name="clustered_input_data.csv",
+            file_name=f"{session.name}_clustered_training_data.csv",
             mime="text/csv",
             use_container_width=True
         )

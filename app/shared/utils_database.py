@@ -2,6 +2,8 @@ import pandas as pd
 import json
 from typing import Dict
 
+from shared.constants import CONSTRUCTION_TYPE_SCHEMA
+
 # -------------------------
 # Reference Column
 # -------------------------
@@ -57,6 +59,30 @@ def update_reference_column(df: pd.DataFrame, row_id, col_name: str, source: str
     return df
 
 
+def compute_final_df(cluster_df, override_df):
+    # Merge cluster and override
+    final_df = override_df.copy()
+    if cluster_df is not None:
+        for col in cluster_df.columns:
+            if col != "Reference":
+                final_df[col] = cluster_df[col].combine_first(override_df[col])
+
+        # Merge references
+        merged_refs = []
+        for idx in final_df.index:
+            c_ref = cluster_df.at[idx, "Reference"] if idx in cluster_df.index else "{}"
+            o_ref = override_df.at[idx, "Reference"] if idx in override_df.index else "{}"
+            merged_refs.append(merge_reference_columns(c_ref, o_ref))
+        final_df["Reference"] = merged_refs
+
+    # Ensure all schema columns are present
+    for col in CONSTRUCTION_TYPE_SCHEMA.keys():
+        if col not in final_df.columns:
+            final_df[col] = None
+
+    return final_df
+
+
 def highlight_cells_by_reference(df: pd.DataFrame):
     def highlight(row):
         style = {}
@@ -80,17 +106,34 @@ def highlight_cells_by_reference(df: pd.DataFrame):
     return df.style.apply(highlight, axis=1)
 
 
-def compute_final_df(cluster_df, override_df):
-    final_df = override_df.copy()
-    for col in cluster_df.columns:
-        if col != "Reference":
-            final_df[col] = cluster_df[col].combine_first(override_df[col])
+def get_baseline_labels(df: pd.DataFrame, label_field="description") -> dict:
+    if df is None:
+        return {}
+    if label_field in df.columns:
+        fallback = pd.Series(df.index.astype(str), index=df.index)
+        return df[label_field].fillna(fallback).astype(str).to_dict()
+    else:
+        return df.index.astype(str).to_series(index=df.index).to_dict()
 
-    # Merge references
-    merged_refs = []
-    for idx in final_df.index:
-        c_ref = cluster_df.at[idx, "Reference"] if idx in cluster_df.index else "{}"
-        o_ref = override_df.at[idx, "Reference"] if idx in override_df.index else "{}"
-        merged_refs.append(merge_reference_columns(c_ref, o_ref))
-    final_df["Reference"] = merged_refs
-    return final_df
+
+def get_validation_map_from_schema(schema_dict_by_table: dict[str, dict]) -> dict:
+    """
+    Constructs a validation map for use in validate_DB_override,
+    extracting only fields that define a validator.
+
+    Parameters:
+    - schema_dict_by_table: dict of {table_name: {field_name: field_schema}}
+
+    Returns:
+    - dict of {table_name: {field_name: validator_function}}
+    """
+    validation_map = {}
+    for table_name, table_schema in schema_dict_by_table.items():       
+        validators = {        
+            field: (props["validator"], props)  # validator and its metadata            
+            for field, props in table_schema.items()
+                if "validator" in props
+        }        
+        if validators:           
+            validation_map[table_name] = validators
+    return validation_map

@@ -3,7 +3,10 @@ from typing import Optional, Dict
 import pandas as pd
 import json
 
-from shared.constants import DATABASEMAKER_STEPS
+from shared.constants import (
+    DATABASEMAKER_STEPS,
+    CONSTRUCTION_TYPE_SCHEMA
+)
 from shared.utils_database import (
     merge_reference_columns,
     update_reference_column
@@ -310,6 +313,12 @@ class DatabaseMakerSession:
                     rows.append(row_data)
 
             table_df = pd.DataFrame(rows).set_index("code")
+
+            # Add missing columns from schema if not present
+            expected_cols = list(CONSTRUCTION_TYPE_SCHEMA.keys())
+            for col in expected_cols:
+                if col not in table_df.columns:
+                    table_df[col] = None
             self.DB_cluster[table_name] = table_df
 
 
@@ -455,20 +464,65 @@ class DatabaseMakerSession:
         errors = {}
 
         for table, df in self.DB_override.items():
-            table_rules = validation_map.get(table, {})
-            for col, validator in table_rules.items():
-                if col not in df.columns or col == "Reference":
+            rules = validation_map.get(table, {})
+            for col, validator_info in rules.items():
+                if col not in df.columns:
                     continue
 
+                # Unpack (validator, meta)
+                if isinstance(validator_info, tuple):
+                    validator, meta = validator_info
+                else:
+                    validator, meta = validator_info, {}
+
                 for idx, val in df[col].items():
-                    # Skip empty values (optional: change to `if pd.notna(val):` if you want to skip)
                     try:
-                        if not validator(val):
+                        if validator.__code__.co_argcount == 1:
+                            valid = validator(val)
+                        elif validator.__code__.co_argcount == 2:
+                            valid = validator(val, meta)
+                        elif validator.__code__.co_argcount == 3:
+                            valid = validator(val, meta, self)
+                        else:
+                            raise ValueError("Unsupported validator signature")
+
+                        if not valid:
                             errors[(table, idx, col)] = f"Invalid value: {val}"
                     except Exception as e:
-                        errors[(table, idx, col)] = f"Validation error: {val} ({e})"
+                        errors[(table, idx, col)] = f"Validation error: {val} ({str(e)})"
 
         return errors
+
+
+    def compute_DB1(self):
+        """
+        For each table in DB_override:
+        - Combine DB_cluster + DB_override to produce DB1.
+        - DB_cluster values take priority (locked).
+        - Merges Reference columns.
+        """
+        self.DB1 = {}
+        for table in self.DB_override:
+            override = self.DB_override[table].copy()
+            cluster = self.DB_cluster.get(table)
+
+            if cluster is not None:
+                for col in cluster.columns:
+                    if col == "Reference":
+                        continue
+                    override[col] = cluster[col].combine_first(override[col])
+
+                # Merge reference columns
+                merged_refs = []
+                for idx in override.index:
+                    c_ref = cluster.at[idx, "Reference"] if idx in cluster.index else "{}"
+                    o_ref = override.at[idx, "Reference"] if idx in override.index else "{}"
+                    merged_refs.append(merge_reference_columns(c_ref, o_ref))
+                override["Reference"] = merged_refs
+
+            self.DB1[table] = override
+
+        self.download_ready = True
 
 
 
