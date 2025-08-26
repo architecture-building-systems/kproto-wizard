@@ -231,13 +231,8 @@ class DatabaseMakerSession:
         """
         Aggregates values from clustered_df using feature_map and column_types,
         computing per-cluster means (numerical) or modes (categorical), and populates DB_cluster.
-        Currently supports only the construction_types table.
+        If no mappings exist, initializes construction_types with correct headers and empty values.
         """
-        if not self.feature_map:
-            self.logger.log("No column mappings provided. Skipping DB_cluster population.")
-            self.DB_cluster = {}  # Ensure it's cleared
-            return
-
         if self.clustered_df is None:
             raise ValueError("clustered_df is not set")
 
@@ -248,12 +243,26 @@ class DatabaseMakerSession:
         df = self.clustered_df.copy()
         df["_cluster"] = df[cluster_col]
 
-        # Step 1: Collect mappings per output table
-        table_aggregates = {}  # { "construction_types": { cluster_id: {cea_col: value, ...}, ... } }
+        if not self.feature_map:
+            self.logger.log("No column mappings provided. Generating empty construction_types table with correct headers.")
+            cluster_ids = sorted(df["_cluster"].unique())
+            rows = []
+            for cluster_id in cluster_ids:
+                row_data = {
+                    "code": f"CT_{cluster_id:02d}",
+                    "Reference": json.dumps({})
+                }
+                for col in CONSTRUCTION_TYPE_SCHEMA.keys():
+                    row_data[col] = None
+                rows.append(row_data)
+            table_df = pd.DataFrame(rows).set_index("code")
+            self.DB_cluster = {"construction_types": table_df}
+            return
 
+        table_aggregates = {}
         self.logger.log(f"Available CEA columns in metadata: {list(self.column_metadata.keys())}")
-        for input_col, cea_col in self.feature_map.items():
 
+        for input_col, cea_col in self.feature_map.items():
             if input_col not in df.columns:
                 self.logger.log(f"Skipping missing input column: {input_col}")
                 continue
@@ -268,11 +277,6 @@ class DatabaseMakerSession:
             self.logger.log(f"Processing input_col: {input_col}, maps to: {cea_col}, type: {col_type}")
             self.logger.log(f"Non-null values in input_col: {df[input_col].notnull().sum()}")
 
-            # Initialize
-            if table_name not in table_aggregates:
-                table_aggregates[table_name] = {}
-
-            # Step 2: Group and aggregate by cluster
             if table_name not in table_aggregates:
                 table_aggregates[table_name] = {}
 
@@ -296,29 +300,22 @@ class DatabaseMakerSession:
                 self.logger.log(f"Skipping column '{input_col}' due to unknown type: {col_type}")
                 continue
 
-
         for table_name, cluster_dict in table_aggregates.items():
             rows = []
-            if not cluster_dict:
-                # At minimum, construct empty DataFrame with expected columns
-                row_data = {"code": f"CT_00", "Reference": json.dumps({})}
+            for cluster_id in sorted(cluster_dict.keys()):
+                row_data = cluster_dict[cluster_id]
+                reference_dict = row_data.pop("Reference", {}) if "Reference" in row_data else {}
+                row_data["code"] = f"CT_{cluster_id:02d}"
+                row_data["Reference"] = json.dumps(reference_dict)
                 rows.append(row_data)
-                self.logger.log(f"Table '{table_name}' is empty but will be initialized with headers.")
-            else:
-                for cluster_id in sorted(cluster_dict.keys()):
-                    row_data = cluster_dict[cluster_id]
-                    reference_dict = row_data.pop("Reference", {}) if "Reference" in row_data else {}
-                    row_data["code"] = f"CT_{cluster_id:02d}"
-                    row_data["Reference"] = json.dumps(reference_dict)
-                    rows.append(row_data)
 
             table_df = pd.DataFrame(rows).set_index("code")
 
-            # Add missing columns from schema if not present
             expected_cols = list(CONSTRUCTION_TYPE_SCHEMA.keys())
             for col in expected_cols:
                 if col not in table_df.columns:
                     table_df[col] = None
+
             self.DB_cluster[table_name] = table_df
 
 

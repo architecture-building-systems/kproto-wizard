@@ -338,7 +338,6 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
 
 
 def show_review_database_ui(session, step_index: int, step_list: list[str]):
-    from shared.constants import CONSTRUCTION_TYPE_SCHEMA
 
     navigation_bar(session, step_index, step_list)
 
@@ -435,14 +434,12 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
 def show_download_database_ui(session, step_index: int, step_list: list[str]):
     navigation_bar(session, step_index, step_list)
 
-    st.title("Download Final Database")
-
     if not session.download_ready or session.DB1 is None:
         st.warning("Database has not yet been finalized. Please return to the previous step to validate and save.")
         return
 
     # --- Preview final construction types ---
-    st.markdown("### :material/table: Construction Types")
+    st.markdown("###### :material/table: Construction Types")
     st.caption("Final construction types table with typologies defined by clusters and/or user edits")
     if "construction_types" in session.DB1:
         st.dataframe(session.DB1["construction_types"], use_container_width=True)
@@ -450,7 +447,7 @@ def show_download_database_ui(session, step_index: int, step_list: list[str]):
         st.warning("No construction_types table found in the final database.")
 
     # --- Download database as ZIP ---
-    st.markdown("### :material/download: Downloads")
+    st.markdown("###### :material/download: Downloads")
     st.caption("Download complete CEA-compatible database and clustered training data")
 
     zip_buffer = export_database_to_zip(session.DB1)
