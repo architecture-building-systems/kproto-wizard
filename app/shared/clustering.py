@@ -253,3 +253,9 @@ def run_kprototypes_clustering(df_raw, column_types, k_range=(2, 30), log_func=N
         shoulder_k,
         results["assignments"]
     )
+
+def relabel_clusters_by_size(cluster_labels):
+    series = pd.Series(cluster_labels)
+    freq_order = series.value_counts().sort_values(ascending=False).index
+    relabel_map = {old_label: new_label for new_label, old_label in enumerate(freq_order)}
+    return series.map(relabel_map)

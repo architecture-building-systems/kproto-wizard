@@ -32,7 +32,8 @@ from shared.utils_ui import (
 
 from shared.clustering import (
     preprocess_loaded_file,
-    run_kprototypes_clustering
+    run_kprototypes_clustering,
+    relabel_clusters_by_size
 )
 
 from shared.vizualization import (
@@ -367,7 +368,8 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
         st.plotly_chart(fig, use_container_width=True)
 
         try:
-            cluster_labels = session.get_assignments_for_k(selected_k)
+            cluster_labels_raw = session.get_assignments_for_k(selected_k)
+            cluster_labels = relabel_clusters_by_size(cluster_labels_raw)
         except ValueError as e:
             st.error(str(e))
             return
@@ -390,6 +392,7 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
         session.download_ready = False
 
         session.populate_DB_cluster()
+        session.logger.log(f"populate_DB_cluster ran. Tables: {list(session.DB_cluster.keys())}")
         session.initialize_DB_override()
 
         st.markdown(f"#### Cluster summary table for *k* = {selected_k}")
@@ -406,7 +409,7 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
 
             # Show dropdown to select a cluster
             with col1.container(border=False):
-                st.markdown(f"#### Cluster Statistics for *k* = 3")
+                st.markdown(f"#### Cluster Statistics for *k* = {selected_k}")
                 st.markdown("View the distribution of features on a per-cluster basis. For mapped to the CEA database, the average value for each cluster feature will be used to populate the construction archetypes.")
                 selected_cluster = st.selectbox("Select cluster to review", options=cluster_ids, key="select_cluster")
 
@@ -442,7 +445,6 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
                     st.markdown(f"`{val}`")
 
                 with f3:
-                    # Corrected variable usage
                     chart = visualize_column_data(col_type, cluster_data[feature], feature)
                     st.altair_chart(chart, use_container_width=True)
 
@@ -472,45 +474,47 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
     # Create validation map from schema
     validation_map = get_validation_map_from_schema({"construction_types": CONSTRUCTION_TYPE_SCHEMA})
 
-    # --- Section 0: Validate + Save Button ---
-    st.subheader("Finalize Construction Types Table")
-    if st.button("Validate and Save", type="primary"):
-        validation_errors = session.validate_DB_override(validation_map)
-        if validation_errors:
-            st.error("Validation failed. Please correct the highlighted issues.")
-            for (table, row, col), msg in validation_errors.items():
-                st.markdown(f"- **{table}**, row `{row}`, column `{col}`: {msg}")
-        else:
-            session.compute_DB1()
-            session.download_ready = True
+    # --- Section 1: Overall table ---
+    with st.container(border=True):
 
-            current_step = step_list[step_index]
-            next_step = step_list[step_index + 1] if step_index + 1 < len(step_list) else None
-            session.step_success[current_step] = True
-            session.step = next_step
+        # --- Read-only overview ---
+        st.markdown("#### Finalize conststruction archetypes table")
+        final_df = compute_final_df(cluster_df, override_df)
+        styled = highlight_cells_by_reference(final_df)
+        st.dataframe(styled, use_container_width=True)
 
-            st.success("Validation passed. Database saved and ready for download.")
-            st.rerun()
+        # --- Save and validate ---
+        if st.button("Validate and Save", type="primary"):
+            validation_errors = session.validate_DB_override(validation_map)
+            if validation_errors:
+                st.error("Validation failed. Please correct the highlighted issues.")
+                for (table, row, col), msg in validation_errors.items():
+                    st.markdown(f"- **{table}**, row `{row}`, column `{col}`: {msg}")
+            else:
+                session.compute_DB1()
+                session.download_ready = True
 
-    # --- Section 1: Read-only overview ---
-    st.subheader("Current Table Overview")
-    final_df = compute_final_df(cluster_df, override_df)
-    styled = highlight_cells_by_reference(final_df)
-    st.dataframe(styled, use_container_width=True)
+                current_step = step_list[step_index]
+                next_step = step_list[step_index + 1] if step_index + 1 < len(step_list) else None
+                session.step_success[current_step] = True
+                session.step = next_step
+
+                st.success("Validation passed. Database saved and ready for download.")
+                st.rerun()
+
 
     # --- Section 2: Row-level editor with consolidated cluster view ---
 
     # Database editor ui and
-    with st.container():
-        st.subheader("Populate construction archetype features")
-        
+    with st.container():      
         ui_cluster_select, ui_autofill_select = st.columns(2)
         
-        with ui_cluster_select.container(border=True, height=205):
-            st.markdown("##### Select active cluster")
+        with ui_cluster_select.container(border=False):
+            st.markdown("#### Populate construction archetype features")
+            st.markdown("Select cluster to autofill from CEA database or to manually edit.")
             row_id = st.selectbox("Select a cluster to edit:", override_df.index)
         
-        with ui_autofill_select.container(border=True, height=205):
+        with ui_autofill_select.container(border=True):
             st.markdown("##### Autofill cluster features from CEA database")
             baseline_labels = get_baseline_labels(baseline_df, label_field="description")
             selected_baseline = st.selectbox(
@@ -546,7 +550,7 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
 
     # Consolidated UI container per feature
 
-    with st.container(border=True):
+    with st.expander("Manually edit cluster features", icon=":material/edit:"):
         result_col, save_col = st.columns([2,2])
         with result_col:
             st.markdown("##### Manually edit cluster features")
