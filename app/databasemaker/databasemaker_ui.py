@@ -395,239 +395,6 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
         st.dataframe(df_summary, use_container_width=True)
 
 
-# def show_review_database_ui(session, step_index: int, step_list: list[str]):
-
-#     navigation_bar(session, step_index, step_list)
-
-#     # Assign tables
-#     table = "construction_types"
-#     cluster_df = session.DB_cluster.get(table)
-#     override_df = session.DB_override.get(table)
-#     baseline_df = session.DB0.get(table)
-
-#     if cluster_df is None or override_df is None or baseline_df is None:
-#         st.warning("Missing required tables for editing.")
-#         return
-
-#     # Create validation map from schema
-#     validation_map = get_validation_map_from_schema({
-#         "construction_types": CONSTRUCTION_TYPE_SCHEMA
-#     })
-
-#     # --- Section 0: Validate + Save Button ---
-#     st.subheader("Finalize Construction Types Table")
-#     if st.button("Validate and Save", type="primary"):
-#         validation_errors = session.validate_DB_override(validation_map)
-#         if validation_errors:
-#             st.error("Validation failed. Please correct the highlighted issues.")
-#             for (table, row, col), msg in validation_errors.items():
-#                 st.markdown(f"- **{table}**, row `{row}`, column `{col}`: {msg}")
-#         else:
-#             session.compute_DB1()
-#             session.download_ready = True
-
-#             current_step = step_list[step_index]
-#             next_step = step_list[step_index + 1] if step_index + 1 < len(step_list) else None
-#             session.step_success[current_step] = True
-#             session.step = next_step
-
-#             st.success("Validation passed. Database saved and ready for download.")
-#             st.rerun()
-
-#     # Compute final merged DB1 table
-#     final_df = compute_final_df(cluster_df, override_df)
-
-#     # --- Section 1: Read-only overview ---
-#     st.subheader("Current Table Overview")
-#     styled = highlight_cells_by_reference(final_df)
-#     st.dataframe(styled, use_container_width=True)
-
-#     # --- Section 2: Row-level editor ---
-#     st.subheader("Edit Individual Row")
-#     row_id = st.selectbox("Select a row to edit:", override_df.index)
-
-#     baseline_labels = get_baseline_labels(baseline_df, label_field="description")
-#     selected_baseline = st.selectbox(
-#         "Auto-fill empty values from baseline row:",
-#         options=baseline_df.index,
-#         format_func=lambda idx: baseline_labels.get(idx, str(idx))
-#     )
-#     if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}"):
-#         for col in override_df.columns:
-#             if col == "Reference":
-#                 continue
-#             cluster_locked = not pd.isna(cluster_df.at[row_id, col])
-#             already_overridden = not pd.isna(override_df.at[row_id, col])
-#             if not cluster_locked and not already_overridden:
-#                 override_df.at[row_id, col] = baseline_df.at[selected_baseline, col]
-#                 ref = json.loads(override_df.at[row_id, "Reference"] or "{}")
-#                 ref[col] = "database"
-#                 override_df.at[row_id, "Reference"] = json.dumps(ref)
-#         st.rerun()
-
-#     # --- Section 3: Modal editor for full table ---
-#     @st.dialog("Edit Entire Construction Types Table")
-#     def edit_full_table():
-#         edited = st.data_editor(override_df, use_container_width=True, num_rows="dynamic")
-#         if st.button("Save changes"):
-#             for col in edited.columns:
-#                 if col == "Reference":
-#                     continue
-#                 for idx in edited.index:
-#                     override_df.at[idx, col] = edited.at[idx, col]
-#                     ref = json.loads(override_df.at[idx, "Reference"] or "{}")
-#                     ref[col] = "user"
-#                     override_df.at[idx, "Reference"] = json.dumps(ref)
-#             st.rerun()
-
-#     if st.button("Open full table editor"):
-#         edit_full_table()
-
-#     # --- Section 4: Final merged table preview ---
-#     st.subheader("Final Merged Table for Export")
-#     final_df = compute_final_df(cluster_df, override_df)
-#     st.dataframe(final_df, use_container_width=True)
-
-# def show_review_database_ui(session, step_index: int, step_list: list[str]):
-#     import json
-#     from copy import deepcopy
-
-#     navigation_bar(session, step_index, step_list)
-
-#     table = "construction_types"
-#     cluster_df = session.DB_cluster.get(table)
-#     override_df = session.DB_override.get(table)
-#     baseline_df = session.DB0.get(table)
-
-#     if cluster_df is None:
-#         st.warning("Missing cluster_df")
-#         return
-#     if override_df is None:
-#         st.warning("Missing override_df")
-#         return
-#     if baseline_df is None:
-#         st.warning("Missing baseline_df")
-#         return
-
-#     validation_map = get_validation_map_from_schema({"construction_types": CONSTRUCTION_TYPE_SCHEMA})
-
-#     st.subheader("Finalize Construction Types Table")
-#     if st.button("Validate and Save", type="primary"):
-#         validation_errors = session.validate_DB_override(validation_map)
-#         if validation_errors:
-#             st.error("Validation failed. Please correct the highlighted issues.")
-#             for (table, row, col), msg in validation_errors.items():
-#                 st.markdown(f"- **{table}**, row `{row}`, column `{col}`: {msg}")
-#         else:
-#             session.compute_DB1()
-#             session.download_ready = True
-#             current_step = step_list[step_index]
-#             next_step = step_list[step_index + 1] if step_index + 1 < len(step_list) else None
-#             session.step_success[current_step] = True
-#             session.step = next_step
-#             st.success("Validation passed. Database saved and ready for download.")
-#             st.rerun()
-
-#     st.subheader("Current Table Overview")
-#     final_df = compute_final_df(cluster_df, override_df)
-#     styled = highlight_cells_by_reference(final_df)
-#     st.dataframe(styled, use_container_width=True)
-
-#     st.subheader("Edit Cluster Parameters")
-#     row_id = st.selectbox("Select a cluster to edit:", override_df.index)
-
-#     # Load baseline for autofill
-#     baseline_labels = get_baseline_labels(baseline_df, label_field="description")
-#     selected_baseline = st.selectbox(
-#         "Auto-fill empty values from baseline row:",
-#         options=baseline_df.index,
-#         format_func=lambda idx: baseline_labels.get(idx, str(idx))
-#     )
-
-#     # Load input state
-#     input_override_df = override_df.copy()
-#     input_ref_str = input_override_df.at[row_id, "Reference"] or "{}"
-#     input_reference_dict = json.loads(input_ref_str)
-
-#     # Start output as copy of input
-#     output_override_df = input_override_df.copy()
-#     output_reference_dict = deepcopy(input_reference_dict)
-
-#     autofill_col, save_col = st.columns([2, 2])
-#     with autofill_col:
-#         if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}"):
-#             for col in override_df.columns:
-#                 if col == "Reference":
-#                     continue
-#                 val = input_override_df.at[row_id, col]
-#                 cluster_val = cluster_df.at[row_id, col]
-#                 if pd.isna(val) and pd.isna(cluster_val):
-#                     new_val = baseline_df.at[selected_baseline, col]
-#                     output_override_df.at[row_id, col] = new_val
-#                     output_reference_dict[col] = "database"
-#             output_override_df.at[row_id, "Reference"] = json.dumps(output_reference_dict)
-#             session.DB_override[table] = output_override_df
-#             st.rerun()
-
-#     with save_col:
-#         if st.button("Save Changes", key=f"save_row_{row_id}"):
-#             for col in override_df.columns:
-#                 if col == "Reference":
-#                     continue
-#                 input_val = input_override_df.at[row_id, col]
-#                 output_val = output_override_df.at[row_id, col]
-#                 if pd.isna(input_val) and not pd.isna(output_val):
-#                     output_reference_dict[col] = "user"
-#                 elif input_val != output_val:
-#                     output_reference_dict[col] = "user"
-#                 else:
-#                     output_reference_dict[col] = input_reference_dict.get(col, "clustering")
-#             output_override_df.at[row_id, "Reference"] = json.dumps(output_reference_dict)
-#             session.DB_override[table] = output_override_df
-#             st.rerun()
-
-#     col1, col2 = st.columns(2)
-#     for col in override_df.columns:
-#         if col == "Reference":
-#             continue
-
-#         ref_source = input_reference_dict.get(col, None)
-#         source_display = {
-#             "clustering": ":gray-background[Clustering]",
-#             "database": ":blue-background[Database]",
-#             "user": ":green-background[User]"
-#         }.get(ref_source, "")
-
-#         with col1:
-#             st.markdown(f"**{col}**  {source_display}")
-#             val = input_override_df.at[row_id, col]
-#             st.text(f"{val if pd.notna(val) else ''}")
-
-#         with col2:
-#             current_val = input_override_df.at[row_id, col]
-#             if is_dropdown_field(col, CONSTRUCTION_TYPE_SCHEMA):
-#                 options = get_dropdown_options_for_field(session, col, CONSTRUCTION_TYPE_SCHEMA)
-#                 selected_index = options.index(current_val) + 1 if current_val in options else 0
-#                 user_input = st.selectbox(
-#                     label="",
-#                     options=["None"] + options,
-#                     index=selected_index,
-#                     key=f"edit_{row_id}_{col}",
-#                     label_visibility="collapsed"
-#                 )
-#                 if user_input and user_input != "None":
-#                     output_override_df.at[row_id, col] = user_input
-#             else:
-#                 user_input = st.text_input(
-#                     label="",
-#                     value="" if pd.isna(current_val) else str(current_val),
-#                     key=f"edit_{row_id}_{col}",
-#                     label_visibility="collapsed"
-#                 )
-#                 if user_input:
-#                     output_override_df.at[row_id, col] = user_input
-
-
 def show_review_database_ui(session, step_index: int, step_list: list[str]):
     import json
     from copy import deepcopy
@@ -680,131 +447,123 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
     st.dataframe(styled, use_container_width=True)
 
     # --- Section 2: Row-level editor with consolidated cluster view ---
-    st.subheader("Edit Cluster Parameters")
 
-    row_id = st.selectbox("Select a cluster to edit:", override_df.index)
+    # Database editor ui and
+    with st.container():
+        st.subheader("Populate construction archetype features")
+        
+        ui_cluster_select, ui_autofill_select = st.columns(2)
+        
+        with ui_cluster_select.container(border=True, height=205):
+            st.markdown("##### Select active cluster")
+            row_id = st.selectbox("Select a cluster to edit:", override_df.index)
+        
+        with ui_autofill_select.container(border=True, height=205):
+            st.markdown("##### Autofill cluster features from CEA database")
+            baseline_labels = get_baseline_labels(baseline_df, label_field="description")
+            selected_baseline = st.selectbox(
+                "Auto-fill empty values from baseline row:",
+                options=baseline_df.index,
+                format_func=lambda idx: baseline_labels.get(idx, str(idx))
+            )
 
-    baseline_labels = get_baseline_labels(baseline_df, label_field="description")
-    selected_baseline = st.selectbox(
-        "Auto-fill empty values from baseline row:",
-        options=baseline_df.index,
-        format_func=lambda idx: baseline_labels.get(idx, str(idx))
-    )
+            # Load input state for comparison
+            input_df = override_df.copy()
+            input_ref_str = input_df.at[row_id, "Reference"] or "{}"
+            input_dict = json.loads(input_ref_str)
 
-    # Load input state for comparison
-    input_df = override_df.copy()
-    input_ref_str = input_df.at[row_id, "Reference"] or "{}"
-    input_dict = json.loads(input_ref_str)
+            # Prepare output containers
+            output_df = input_df.copy()
+            output_dict = deepcopy(input_dict)
+            proposed_changes = {}
 
-    # Prepare output containers
-    output_df = input_df.copy()
-    output_dict = deepcopy(input_dict)
-    proposed_changes = {}
-
-    # Buttons
-    autofill_col, save_col = st.columns([2, 2])
-    with autofill_col:
-        if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}"):
-            for col in override_df.columns:
-                if col == "Reference":
-                    continue
-                cluster_locked = not pd.isna(cluster_df.at[row_id, col])
-                already_overridden = not pd.isna(input_df.at[row_id, col])
-                if not cluster_locked and not already_overridden:
-                    val = baseline_df.at[selected_baseline, col]
-                    output_df.at[row_id, col] = val
-                    output_dict[col] = "database"
-            output_df.at[row_id, "Reference"] = json.dumps(output_dict)
-            session.DB_override[table] = output_df
-            st.rerun()
-
-    # Collect UI inputs
-    col1, col2 = st.columns(2)
-    for col in override_df.columns:
-        if col == "Reference":
-            continue
-
-        # LEFT: show current value + source
-        with col1:
-            st.markdown(f"**{col}**")
-            value = input_df.at[row_id, col]
-            source = input_dict.get(col, "")
-            if source:
-                st.markdown(f":gray-background[`{source}`] {value if pd.notna(value) else ''}")
-            else:
-                st.text(f"{value if pd.notna(value) else ''}")
-
-        # RIGHT: editable input field
-        with col2:
-            source = input_dict.get(col, "")
-            editable = source != "clustering"
-
-            if is_dropdown_field(col, CONSTRUCTION_TYPE_SCHEMA):
-                options = get_dropdown_options_for_field(session, col, CONSTRUCTION_TYPE_SCHEMA)
-                current_value = input_df.at[row_id, col]
-                default_index = 0
-                if pd.notna(current_value) and current_value in options:
-                    default_index = options.index(current_value) + 1
-                user_input = st.selectbox(
-                    label="",
-                    options=[""] + options,
-                    index=default_index,
-                    key=f"edit_{row_id}_{col}",
-                    label_visibility="collapsed",
-                    disabled=not editable
-                )
-                proposed_changes[col] = user_input if user_input else None
-            else:
-                current_value = input_df.at[row_id, col]
-                user_input = st.text_input(
-                    label="",
-                    value="" if pd.isna(current_value) else str(current_value),
-                    key=f"edit_{row_id}_{col}",
-                    label_visibility="collapsed",
-                    disabled=not editable
-                )
-                proposed_changes[col] = user_input if user_input else None
-
-
-    with save_col:
-            if st.button("Save Changes", key=f"save_row_{row_id}"):
-                for col, new_val in proposed_changes.items():
+            # Button
+            if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}", use_container_width=True, icon=":material/save:"):
+                for col in override_df.columns:
                     if col == "Reference":
                         continue
-                    old_val = input_df.at[row_id, col]
-
-                    # Handle NaN input
-                    if pd.isna(old_val) and new_val:
-                        output_df.at[row_id, col] = new_val
-                        output_dict[col] = "user"
-                        continue
-
-                    # Attempt to cast both old and new to same type
-                    expected_type = CONSTRUCTION_TYPE_SCHEMA.get(col, {}).get("type", "str")
-                    try:
-                        if expected_type == "float":
-                            cast_old = float(old_val) if pd.notna(old_val) else None
-                            cast_new = float(new_val) if new_val not in [None, ""] else None
-                        elif expected_type == "int":
-                            cast_old = int(old_val) if pd.notna(old_val) else None
-                            cast_new = int(new_val) if new_val not in [None, ""] else None
-                        else:
-                            cast_old = str(old_val) if pd.notna(old_val) else None
-                            cast_new = str(new_val) if new_val not in [None, ""] else None
-                    except Exception:
-                        cast_old, cast_new = old_val, new_val  # fallback on raw
-
-                    # Compare
-                    if cast_new != cast_old:
-                        output_df.at[row_id, col] = new_val
-                        output_dict[col] = "user"
-                    else:
-                        output_dict[col] = input_dict.get(col, "clustering")
-
-                # Save final override
+                    cluster_locked = not pd.isna(cluster_df.at[row_id, col])
+                    already_overridden = not pd.isna(input_df.at[row_id, col])
+                    if not cluster_locked and not already_overridden:
+                        val = baseline_df.at[selected_baseline, col]
+                        output_df.at[row_id, col] = val
+                        output_dict[col] = "database"
                 output_df.at[row_id, "Reference"] = json.dumps(output_dict)
                 session.DB_override[table] = output_df
                 st.rerun()
+
+    # Consolidated UI container per feature
+
+    with st.container(border=True):
+        result_col, save_col = st.columns([2,2])
+        with result_col:
+            st.markdown("##### Manually edit cluster features")
+
+        for col in override_df.columns:
+            if col == "Reference":
+                continue
+
+            with st.container(border=True):
+                c1, c2 = st.columns([1, 1])
+
+                with c1:
+                    st.markdown(f"**{col}**")
+                    value = input_df.at[row_id, col]
+                    source = input_dict.get(col, "")
+                    if source:
+                        st.markdown(f":gray-background[`{source}`] {value if pd.notna(value) else ''}")
+                    else:
+                        st.text(f"{value if pd.notna(value) else ''}")
+
+                with c2:
+                    source = input_dict.get(col, "")
+                    editable = source != "clustering"
+
+                    if is_dropdown_field(col, CONSTRUCTION_TYPE_SCHEMA):
+                        options = get_dropdown_options_for_field(session, col, CONSTRUCTION_TYPE_SCHEMA)
+                        current_value = input_df.at[row_id, col]
+                        default_index = 0
+                        if pd.notna(current_value) and current_value in options:
+                            default_index = options.index(current_value) + 1
+                        user_input = st.selectbox(
+                            label="",
+                            options=[""] + options,
+                            index=default_index,
+                            key=f"edit_{row_id}_{col}",
+                            label_visibility="collapsed",
+                            disabled=not editable
+                        )
+                        proposed_changes[col] = user_input if user_input else None
+                    else:
+                        current_value = input_df.at[row_id, col]
+                        user_input = st.text_input(
+                            label="",
+                            value="" if pd.isna(current_value) else str(current_value),
+                            key=f"edit_{row_id}_{col}",
+                            label_visibility="collapsed",
+                            disabled=not editable
+                        )
+                        proposed_changes[col] = user_input if user_input else None
+
+    with save_col:
+        if st.button("Apply Manual Edits", key=f"save_row_{row_id}", use_container_width=True, icon=":material/save:"):
+            for col, new_val in proposed_changes.items():
+                if col == "Reference":
+                    continue
+                old_val = input_df.at[row_id, col]
+
+                if pd.isna(old_val) and new_val:
+                    output_df.at[row_id, col] = new_val
+                    output_dict[col] = "user"
+                elif new_val != old_val:
+                    output_df.at[row_id, col] = new_val
+                    output_dict[col] = "user"
+                else:
+                    output_dict[col] = input_dict.get(col, "clustering")
+
+            output_df.at[row_id, "Reference"] = json.dumps(output_dict)
+            session.DB_override[table] = output_df
+            st.rerun()
 
 
 
