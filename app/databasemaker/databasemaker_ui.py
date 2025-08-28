@@ -37,7 +37,8 @@ from shared.clustering import (
 
 from shared.vizualization import (
     visualize_column_data,
-    plot_kprototypes_results
+    plot_kprototypes_results,
+    plot_cluster_distribution
 )
 
 from shared.utils_database import (
@@ -325,53 +326,53 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
     current_step = step_list[step_index]
     session.step_success[current_step] = True  # mark this step complete
 
-    # --- Layout Header ---
-    h1, h2 = st.columns([1,1])
-    h1.markdown("Clustering Results")
-    h2.markdown("Review")
+    # --- select k value container ---
+    with st.container(border=True):
 
-    c1, c2 = st.columns([1,1])
+        col1, col2 = st.columns([3,5])
 
-    # Review Column
-    with c2:
-        with st.container(border=True):
+        # instructions
+        with col1:
+            st.markdown("#### Select *k* value")
             st.markdown("Customize construction typology count by selecting k value. Defaults to peak k.")
             available_ks = sorted(session.cost_per_k.keys())
-            default_k = session.peak_k or session.best_k
-            selected_k = st.slider(
-                "Select k",
-                min_value=min(available_ks),
-                max_value=max(available_ks),
-                value=default_k,
-                key=f"custom_k_slider_{session.name}"
-            )
-    
-    # Clustering results
-    with c1:
-        with st.expander(":material/analytics: Clustering Metrics", expanded=True):
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Peak k (max silhouette)", session.peak_k)
-            col2.metric("Shoulder k (≥ 0.5 silhouette)", session.shoulder_k)
-            col3.metric("Least cost k", session.best_k)
 
-        with st.expander(":material/line_axis: All Clustering Results", expanded=True):
-            fig = plot_kprototypes_results(
-                k_range=session.cost_per_k.keys(),
-                costs=session.cost_per_k,
-                silhouettes=session.silhouette_per_k,
-                peak_k=session.peak_k,
-                shoulder_k=session.shoulder_k
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        # metrics
+        with col2:
+            metric1, metric2, metric3 = st.columns(3)
+            metric1.container(border=True).metric("Peak k (max silhouette)", session.peak_k)
+            metric2.container(border=True).metric("Shoulder k (≥ 0.5 silhouette)", session.shoulder_k)
+            metric3.container(border=True).metric("Least cost k", session.best_k)
 
-            try:
-                cluster_labels = session.get_assignments_for_k(selected_k)
-            except ValueError as e:
-                st.error(str(e))
-                return
+        # slider to select k value
+        default_k = session.peak_k or session.best_k
+        selected_k = st.slider(
+            "Select k",
+            min_value=min(available_ks),
+            max_value=max(available_ks),
+            value=default_k,
+            key=f"custom_k_slider_{session.name}"
+        )
 
+    # view clustering results
+    with st.expander("All clustering results", expanded=True, icon=":material/analytics:"):
+        st.markdown("#### All clustering results")
+        fig = plot_kprototypes_results(
+            k_range=session.cost_per_k.keys(),
+            costs=session.cost_per_k,
+            silhouettes=session.silhouette_per_k,
+            peak_k=session.peak_k,
+            shoulder_k=session.shoulder_k
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander(":material/table: Cluster Summary Table", expanded=True):
+        try:
+            cluster_labels = session.get_assignments_for_k(selected_k)
+        except ValueError as e:
+            st.error(str(e))
+            return
+
+    with st.expander("Cluster summary table", expanded=True, icon=":material/table:"):
         df_clustered = session.X0.copy()
         df_clustered["cluster"] = cluster_labels
         df_summary = df_clustered.groupby("cluster").agg(
@@ -391,8 +392,59 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
         session.populate_DB_cluster()
         session.initialize_DB_override()
 
-        st.markdown("#### Cluster Summary Table")
+        st.markdown(f"#### Cluster summary table for *k* = {selected_k}")
         st.dataframe(df_summary, use_container_width=True)
+
+    # --- review cluster breakdown ---
+    with st.expander("Review Cluster Statistics", icon=":material/candlestick_chart:"):
+        df_clustered = session.clustered_df
+        column_types = session.column_types
+        cluster_ids = sorted(df_clustered['cluster'].unique())
+
+        with st.container():
+            col1, col2 = st.columns([3, 5])
+
+            # Show dropdown to select a cluster
+            with col1.container(border=False):
+                st.markdown(f"#### Cluster Statistics for *k* = 3")
+                st.markdown("View the distribution of features on a per-cluster basis. For mapped to the CEA database, the average value for each cluster feature will be used to populate the construction archetypes.")
+                selected_cluster = st.selectbox("Select cluster to review", options=cluster_ids, key="select_cluster")
+
+            # Show bar chart of cluster sizes
+            with col2.container(border=True):
+                chart = plot_cluster_distribution(df_clustered, cluster_col="cluster")
+                st.altair_chart(chart, use_container_width=True)
+
+        cluster_data = df_clustered[df_clustered['cluster'] == selected_cluster]
+
+        with st.container(border=False):
+            e1, e2, e3 = st.columns([1.5, 1.5, 5])
+            e1.markdown("**Feature**")
+            e2.markdown("**Avg. Value**")
+            e3.markdown("**Feature Distribution**")
+
+        for feature in session.feature_map.keys():
+            col_type = column_types.get(feature)
+
+            with st.container(border=True):
+                f1, f2, f3 = st.columns([1.5, 1.5, 5])
+
+                with f1:
+                    st.markdown(f"**{feature}** ({col_type})")
+
+                with f2:
+                    if col_type == "numerical":
+                        val = round(cluster_data[feature].mean(), 3)
+                    elif col_type == "categorical":
+                        val = cluster_data[feature].mode().iloc[0] if not cluster_data[feature].mode().empty else "-"
+                    else:
+                        val = "-"
+                    st.markdown(f"`{val}`")
+
+                with f3:
+                    # Corrected variable usage
+                    chart = visualize_column_data(col_type, cluster_data[feature], feature)
+                    st.altair_chart(chart, use_container_width=True)
 
 
 def show_review_database_ui(session, step_index: int, step_list: list[str]):
@@ -566,10 +618,6 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
             st.rerun()
 
 
-
-
-
-
 def show_download_database_ui(session, step_index: int, step_list: list[str]):
     navigation_bar(session, step_index, step_list)
 
@@ -615,16 +663,21 @@ def show_download_database_ui(session, step_index: int, step_list: list[str]):
         st.info("Clustered training data not available.")
                 
 
-
 # --------------------------------------------------------------------------------------
 # PAGE LAYOUT
 # --------------------------------------------------------------------------------------
 
 def show_databasemaker_page():
-    st.markdown("## :material/database: Database Maker")
 
     # --- Top bar with session actions ---
-    t1, t2, t3 = st.columns(3)
+
+    top1, top2 = st.columns([3,2])
+    top1.markdown("## :material/database: Database Maker")
+
+    with top2:
+        st.container(height=1, border=False)
+        t1, t2, t3 = st.columns(3)
+
     with t1.popover("New", icon=":material/add:", use_container_width=True):
         show_create_databasemaker_session_ui(DATABASEMAKER_STEPS)
     with t2.popover("Switch", icon=":material/menu_open:", use_container_width=True):

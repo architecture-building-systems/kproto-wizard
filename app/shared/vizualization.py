@@ -83,7 +83,6 @@ def plot_kprototypes_results(
 
     # Layout and formatting
     fig.update_layout(
-        title=title,
         xaxis_title='Number of Clusters (k)',
         yaxis_title='Cost (WSS)',
         yaxis2_title='Silhouette Score',
@@ -97,3 +96,30 @@ def plot_kprototypes_results(
     fig.update_yaxes(showgrid=True, secondary_y=True)
 
     return fig
+
+
+def plot_cluster_distribution(df_clustered: pd.DataFrame, cluster_col: str = "cluster") -> alt.Chart:
+    """
+    Plots a simple bar chart showing the count of items in each cluster.
+
+    Parameters:
+        df_clustered: DataFrame that includes cluster labels.
+        cluster_col: Name of the column indicating cluster assignment.
+
+    Returns:
+        Altair Chart object.
+    """
+    cluster_counts = df_clustered[cluster_col].value_counts().reset_index()
+    cluster_counts.columns = [cluster_col, "count"]
+    cluster_counts = cluster_counts.sort_values(cluster_col)
+
+    chart = alt.Chart(cluster_counts).mark_bar().encode(
+        x=alt.X(f"{cluster_col}:O", title="Cluster"),
+        y=alt.Y("count:Q", title="Count"),
+        tooltip=[f"{cluster_col}:O", "count:Q"]
+    ).properties(
+        title="Cluster Count Distribution",
+        height=200
+    )
+
+    return chart
