@@ -186,7 +186,6 @@ def export_database_to_directory(db: dict[str, pd.DataFrame], output_path: Path 
         else:
             print(f"[export_database_to_directory] Warning: No export path defined for table '{table_name}'")
 
-
 def export_database_to_zip(db1: dict) -> io.BytesIO:
     """
     Export a structured CEA-style database to a zip archive.
@@ -237,6 +236,13 @@ def cast_dataframe_to_schema_types(df: pd.DataFrame, schema: dict) -> pd.DataFra
             print(f"Warning: Could not cast column {col} to {expected_type}: {e}")
 
     return df
+
+def is_dropdown_field(field_name: str, schema: dict[str, dict]) -> bool:
+    """
+    Returns True if the field is defined as a dropdown (i.e. 'code_ref') in the schema.
+    """
+    meta = schema.get(field_name, {})
+    return meta.get("type") == "code_ref"
 
 def get_dropdown_options_for_field(
     session,
@@ -410,3 +416,4 @@ def validate_full_database(
                 all_errors[table_name] = errors
 
     return all_errors
+

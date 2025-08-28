@@ -23,14 +23,14 @@ def visualize_column_data(dtype: str, column_data: pd.Series, col_name: str) -> 
                 legend=None
             ),
             tooltip=["value:N", "count:Q"]
-        ).properties(height=65)
+        ).properties(height=120)
 
     elif dtype == "numerical":
         df = pd.DataFrame({"value": column_data, "column": col_name})
         chart = alt.Chart(df).mark_boxplot(extent="min-max", ticks=False).encode(
             x=alt.X("value:Q", title=None),
             y=alt.Y("column:N", title=None, axis=alt.Axis(labels=False))
-        ).properties(height=75)
+        ).properties(height=120)
 
     else:
         # Return an invisible placeholder
@@ -41,7 +41,7 @@ def visualize_column_data(dtype: str, column_data: pd.Series, col_name: str) -> 
 
 def plot_kprototypes_results(
     k_range, costs, silhouettes, peak_k=None, shoulder_k=None,
-    title='K-Prototypes Evaluation', threshold=0.5, width=400, height=400
+    title='Clustering Results', threshold=0.5, width=400, height=400
 ):
     x_vals = list(k_range)
     cost_vals = [costs.get(k, None) for k in x_vals]

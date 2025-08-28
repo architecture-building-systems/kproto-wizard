@@ -1,5 +1,7 @@
 import streamlit as st
 
+st.set_page_config(layout="wide")
+
 pages = {
     "CEA Database Wizard": [
         st.Page("home_ui.py", title="Home", icon=":material/home:"),
