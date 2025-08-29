@@ -397,7 +397,7 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
         st.dataframe(df_summary, use_container_width=True)
 
     # --- review cluster breakdown ---
-    with st.expander(f"Review Cluster Statistics for *k* = {selected_k}", icon=":material/candlestick_chart:"):
+    with st.expander(f"Review Cluster Statistics for *k* = {selected_k}", icon=":material/candlestick_chart:", expanded=True):
         df_clustered = session.clustered_df
         column_types = session.column_types
         cluster_ids = sorted(df_clustered['cluster'].unique())
@@ -551,7 +551,7 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
 
     # Consolidated UI container per feature
 
-    with st.expander("Manually edit cluster features", icon=":material/edit:"):
+    with st.expander("Manually edit cluster features", icon=":material/edit:", expanded=True):
         result_col, save_col = st.columns([2,2])
         with result_col:
             st.caption("Adjust cluster-specific feature values maunally.")
