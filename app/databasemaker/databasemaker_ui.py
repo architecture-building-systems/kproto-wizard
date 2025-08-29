@@ -181,8 +181,8 @@ def show_column_mapping_ui(session, step_index: int, step_list: list[str]):
 
     # --- Table Header ---
     h1, h2 = st.columns([1,1])
-    h1.markdown("Input Feature")
-    h2.markdown("Manage")
+    h1.markdown("**Input dataset feature**")
+    h2.markdown("**Manange feature**")
 
     # --- Table Rows ---
     for col in df.columns:
@@ -334,8 +334,8 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
 
         # instructions
         with col1:
-            st.markdown("#### Select *k* value")
-            st.markdown("Customize construction typology count by selecting k value. Defaults to peak k.")
+            st.markdown("###### :material/left_click: Select *k* value")
+            st.caption("Customize construction typology count by selecting k value. Defaults to peak k.")
             available_ks = sorted(session.cost_per_k.keys())
 
         # metrics
@@ -357,7 +357,6 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
 
     # view clustering results
     with st.expander("All clustering results", expanded=True, icon=":material/analytics:"):
-        st.markdown("#### All clustering results")
         fig = plot_kprototypes_results(
             k_range=session.cost_per_k.keys(),
             costs=session.cost_per_k,
@@ -374,7 +373,7 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
             st.error(str(e))
             return
 
-    with st.expander("Cluster summary table", expanded=True, icon=":material/table:"):
+    with st.expander(f"Cluster summary table for *k* = {selected_k}", expanded=True, icon=":material/table:"):
         df_clustered = session.X0.copy()
         df_clustered["cluster"] = cluster_labels
         df_summary = df_clustered.groupby("cluster").agg(
@@ -395,11 +394,10 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
         session.logger.log(f"populate_DB_cluster ran. Tables: {list(session.DB_cluster.keys())}")
         session.initialize_DB_override()
 
-        st.markdown(f"#### Cluster summary table for *k* = {selected_k}")
         st.dataframe(df_summary, use_container_width=True)
 
     # --- review cluster breakdown ---
-    with st.expander("Review Cluster Statistics", icon=":material/candlestick_chart:"):
+    with st.expander(f"Review Cluster Statistics for *k* = {selected_k}", icon=":material/candlestick_chart:"):
         df_clustered = session.clustered_df
         column_types = session.column_types
         cluster_ids = sorted(df_clustered['cluster'].unique())
@@ -409,9 +407,8 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
 
             # Show dropdown to select a cluster
             with col1.container(border=False):
-                st.markdown(f"#### Cluster Statistics for *k* = {selected_k}")
-                st.markdown("View the distribution of features on a per-cluster basis. For mapped to the CEA database, the average value for each cluster feature will be used to populate the construction archetypes.")
-                selected_cluster = st.selectbox("Select cluster to review", options=cluster_ids, key="select_cluster")
+                st.caption("View the distribution of features on a per-cluster basis. For mapped to the CEA database, the average value for each cluster feature will be used to populate the construction archetypes.")
+                selected_cluster = st.selectbox("Select target cluster for feature-specific review", options=cluster_ids, key="select_cluster")
 
             # Show bar chart of cluster sizes
             with col2.container(border=True):
@@ -433,7 +430,10 @@ def show_review_clustering_ui(session, step_index: int, step_list: list[str]):
                 f1, f2, f3 = st.columns([1.5, 1.5, 5])
 
                 with f1:
-                    st.markdown(f"**{feature}** ({col_type})")
+                    st.markdown(f"""
+                        **{feature}**
+                        :gray-badge[{col_type}]"""
+                        )
 
                 with f2:
                     if col_type == "numerical":
@@ -478,13 +478,14 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
     with st.container(border=True):
 
         # --- Read-only overview ---
-        st.markdown("#### Finalize conststruction archetypes table")
+        st.markdown("###### :material/table: Finalize conststruction archetypes table")
         final_df = compute_final_df(cluster_df, override_df)
         styled = highlight_cells_by_reference(final_df)
         st.dataframe(styled, use_container_width=True)
 
         # --- Save and validate ---
-        if st.button("Validate and Save", type="primary"):
+
+        if st.button("Validate and Save", type="primary", use_container_width=True, icon=":material/save:"):
             validation_errors = session.validate_DB_override(validation_map)
             if validation_errors:
                 st.error("Validation failed. Please correct the highlighted issues.")
@@ -509,13 +510,13 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
     with st.container():      
         ui_cluster_select, ui_autofill_select = st.columns(2)
         
-        with ui_cluster_select.container(border=False):
-            st.markdown("#### Populate construction archetype features")
-            st.markdown("Select cluster to autofill from CEA database or to manually edit.")
+        with ui_cluster_select.container(border=True, height=205):
+            st.markdown("###### :material/category: Populate construction archetype features")
+            st.caption("Select cluster to autofill from CEA database and manually edit.")
             row_id = st.selectbox("Select a cluster to edit:", override_df.index)
         
-        with ui_autofill_select.container(border=True):
-            st.markdown("##### Autofill cluster features from CEA database")
+        with ui_autofill_select.container(border=True, height=205):
+            st.markdown("###### :material/wand_shine: Autofill cluster features from CEA database")
             baseline_labels = get_baseline_labels(baseline_df, label_field="description")
             selected_baseline = st.selectbox(
                 "Auto-fill empty values from baseline row:",
@@ -534,7 +535,7 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
             proposed_changes = {}
 
             # Button
-            if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}", use_container_width=True, icon=":material/save:"):
+            if st.button("Apply Auto-Fill", key=f"apply_baseline_{row_id}", use_container_width=True):
                 for col in override_df.columns:
                     if col == "Reference":
                         continue
@@ -553,7 +554,8 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
     with st.expander("Manually edit cluster features", icon=":material/edit:"):
         result_col, save_col = st.columns([2,2])
         with result_col:
-            st.markdown("##### Manually edit cluster features")
+            st.caption("Adjust cluster-specific feature values maunally.")
+            pass
 
         for col in override_df.columns:
             if col == "Reference":
@@ -602,7 +604,7 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
                         proposed_changes[col] = user_input if user_input else None
 
     with save_col:
-        if st.button("Apply Manual Edits", key=f"save_row_{row_id}", use_container_width=True, icon=":material/save:"):
+        if st.button("Apply Manual Edits", key=f"save_row_{row_id}", use_container_width=True):
             for col, new_val in proposed_changes.items():
                 if col == "Reference":
                     continue
@@ -630,41 +632,49 @@ def show_download_database_ui(session, step_index: int, step_list: list[str]):
         return
 
     # --- Preview final construction types ---
-    st.markdown("###### :material/table: Construction Types")
-    st.caption("Final construction types table with typologies defined by clusters and/or user edits")
-    if "construction_types" in session.DB1:
-        st.dataframe(session.DB1["construction_types"], use_container_width=True)
-    else:
-        st.warning("No construction_types table found in the final database.")
+    with st.container(border=True):
+        st.markdown("###### :material/table: Construction Types")
+        st.caption("Final construction types table with typologies defined by clusters and user edits")
+        if "construction_types" in session.DB1:
+            st.dataframe(session.DB1["construction_types"], use_container_width=True)
+        else:
+            st.warning("No construction_types table found in the final database.")
 
-    # --- Download database as ZIP ---
-    st.markdown("###### :material/download: Downloads")
-    st.caption("Download complete CEA-compatible database and clustered training data")
+    # --- Download window ---
+    with st.container(border=True):
+        
+        # Download CEA database as ZIP
+        st.markdown("###### :material/download: Downloads")
+        st.caption("Download complete CEA-compatible database and clustered training data")
 
-    zip_buffer = export_database_to_zip(session.DB1)
-    st.download_button(
-        label="Download ZIP (Final CEA Database)",
-        data=zip_buffer.getvalue(),
-        file_name=f"{session.name}_cea_database.zip",
-        mime="application/zip",
-        use_container_width=True,
-        type="primary"
-    )
+        train_download_col, db_download_col = st.columns([2,2])
 
-    # --- Download clustered training data ---
-    if session.clustered_df is not None and "cluster" in session.clustered_df.columns:
-        csv_buf = io.StringIO()
-        session.clustered_df.to_csv(csv_buf, index=False)
-
-        st.download_button(
-            label="Download Clustered Training Set (CSV)",
-            data=csv_buf.getvalue(),
-            file_name=f"{session.name}_clustered_training_data.csv",
-            mime="text/csv",
-            use_container_width=True
+        zip_buffer = export_database_to_zip(session.DB1)
+        db_download_col.download_button(
+            label="Download CEA Database (ZIP)",
+            icon=":material/database:",
+            data=zip_buffer.getvalue(),
+            file_name=f"{session.name}_cea_database.zip",
+            mime="application/zip",
+            use_container_width=True,
+            type="primary"
         )
-    else:
-        st.info("Clustered training data not available.")
+
+        # Download clustered training data
+        if session.clustered_df is not None and "cluster" in session.clustered_df.columns:
+            csv_buf = io.StringIO()
+            session.clustered_df.to_csv(csv_buf, index=False)
+
+            train_download_col.download_button(
+                label="Download Clustered Training Set (CSV)",
+                icon=":material/table:",
+                data=csv_buf.getvalue(),
+                file_name=f"{session.name}_clustered_training_data.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.info("Clustered training data not available.")
                 
 
 # --------------------------------------------------------------------------------------
@@ -675,7 +685,7 @@ def show_databasemaker_page():
 
     # --- Top bar with session actions ---
 
-    top1, top2 = st.columns([3,2])
+    top1, top2 = st.columns([3,3])
     top1.markdown("## :material/database: Database Maker")
 
     with top2:
