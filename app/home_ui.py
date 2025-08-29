@@ -20,7 +20,7 @@ def home_page():
 
     yourdata_container = st.container(border=True)
     with yourdata_container:
-        st.markdown("#### :material/download: Your Data")
+        st.markdown("#### :material/folder: Your Data")
         yd1, yd2 = st.columns([3,2])
         yd1.caption("View and download your data from current and previous Database Maker sessions.")
         if yd2.button("Your Data →", type="secondary", use_container_width=True):
@@ -33,6 +33,6 @@ def home_page():
         ic1.caption("Learn about the City Energy Analyst and the research behind Database Maker.")
         with ic2:
             if st.button("About →", type="secondary", use_container_width=True):
-                st.switch_page("userdata_ui.py")
+                st.switch_page("about_ui.py")
 
 home_page()
