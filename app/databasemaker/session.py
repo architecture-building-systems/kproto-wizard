@@ -241,10 +241,10 @@ class DatabaseMakerSession:
         cluster_col = "cluster"
         df = self.clustered_df.copy()
         df["_cluster"] = df[cluster_col]
-
-        # Initialize fallback output in case nothing is mapped
-        fallback_rows = []
         cluster_ids = sorted(df["_cluster"].unique())
+
+        # Prepare fallback empty table
+        fallback_rows = []
         for cluster_id in cluster_ids:
             row_data = {
                 "code": f"CT_{cluster_id:02d}",
@@ -253,12 +253,10 @@ class DatabaseMakerSession:
             for col in CONSTRUCTION_TYPE_SCHEMA.keys():
                 row_data[col] = None
             fallback_rows.append(row_data)
-
         fallback_table = pd.DataFrame(fallback_rows).set_index("code")
 
         table_aggregates = {}
         has_valid_mapping = False
-
         self.logger.log(f"Available CEA columns in metadata: {list(self.column_metadata.keys())}")
 
         for input_col, cea_col in self.feature_map.items():
@@ -271,7 +269,6 @@ class DatabaseMakerSession:
 
             table_name, _ = self.column_metadata[cea_col]
             col_type = self.column_types.get(input_col)
-
             self.logger.log(f"Processing input_col: {input_col}, maps to: {cea_col}, type: {col_type}")
             self.logger.log(f"Non-null values in input_col: {df[input_col].notnull().sum()}")
 
@@ -292,11 +289,14 @@ class DatabaseMakerSession:
                 row.setdefault("Reference", {})[cea_col] = "clustering"
                 has_valid_mapping = True
 
+        self.DB_cluster = {}  # Reset container
+
         if not has_valid_mapping:
-            self.logger.log("No usable mappings or no data available. Using fallback empty table.")
-            self.DB_cluster = {"construction_types": fallback_table}
+            self.logger.log("No usable mappings or data available. Using fallback empty construction_types table.")
+            self.DB_cluster["construction_types"] = fallback_table
             return
 
+        # Build actual tables from aggregation
         for table_name, cluster_dict in table_aggregates.items():
             rows = []
             for cluster_id in sorted(cluster_dict.keys()):
@@ -308,29 +308,18 @@ class DatabaseMakerSession:
 
             table_df = pd.DataFrame(rows).set_index("code")
 
-            # Ensure all expected columns exist
-            expected_cols = list(CONSTRUCTION_TYPE_SCHEMA.keys())
-            for col in expected_cols:
+            # Ensure all expected schema columns are present
+            for col in CONSTRUCTION_TYPE_SCHEMA.keys():
                 if col not in table_df.columns:
                     table_df[col] = None
 
             self.DB_cluster[table_name] = table_df
 
-            # Fallback: ensure at least one empty table exists
-            if not self.DB_cluster.get("construction_types"):
-                self.logger.log("No data produced from clustering. Initializing empty construction_types table.")
-                cluster_ids = sorted(df["_cluster"].unique())
-                rows = []
-                for cluster_id in cluster_ids:
-                    row_data = {
-                        "code": f"CT_{cluster_id:02d}",
-                        "Reference": json.dumps({})
-                    }
-                    for col in CONSTRUCTION_TYPE_SCHEMA.keys():
-                        row_data[col] = None
-                    rows.append(row_data)
-                table_df = pd.DataFrame(rows).set_index("code")
-                self.DB_cluster["construction_types"] = table_df
+        # Final fallback: ensure construction_types exists (even if no mappings to it)
+        if "construction_types" not in self.DB_cluster:
+            self.logger.log("No construction_types table was created — injecting fallback.")
+            self.DB_cluster["construction_types"] = fallback_table
+
 
 
     # -------------------------

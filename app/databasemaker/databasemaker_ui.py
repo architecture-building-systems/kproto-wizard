@@ -604,21 +604,47 @@ def show_review_database_ui(session, step_index: int, step_list: list[str]):
                         proposed_changes[col] = user_input if user_input else None
 
     with save_col:
-        if st.button("Apply Manual Edits", key=f"save_row_{row_id}", use_container_width=True):
+        if st.button("Apply Manual Changes", key=f"save_row_{row_id}", use_container_width=True):
             for col, new_val in proposed_changes.items():
                 if col == "Reference":
                     continue
+
+                # --- Prevent editing of clustering-defined fields ---
+                original_source = input_dict.get(col, "")
+                if original_source == "clustering":
+                    continue  # skip this field entirely
+
                 old_val = input_df.at[row_id, col]
 
+                # Handle NaN input
                 if pd.isna(old_val) and new_val:
                     output_df.at[row_id, col] = new_val
                     output_dict[col] = "user"
-                elif new_val != old_val:
+                    continue
+
+                # Attempt to cast both old and new to same type
+                expected_type = CONSTRUCTION_TYPE_SCHEMA.get(col, {}).get("type", "str")
+                try:
+                    if expected_type == "float":
+                        cast_old = float(old_val) if pd.notna(old_val) else None
+                        cast_new = float(new_val) if new_val not in [None, ""] else None
+                    elif expected_type == "int":
+                        cast_old = int(old_val) if pd.notna(old_val) else None
+                        cast_new = int(new_val) if new_val not in [None, ""] else None
+                    else:
+                        cast_old = str(old_val) if pd.notna(old_val) else None
+                        cast_new = str(new_val) if new_val not in [None, ""] else None
+                except Exception:
+                    cast_old, cast_new = old_val, new_val  # fallback
+
+                # Compare
+                if cast_new != cast_old:
                     output_df.at[row_id, col] = new_val
                     output_dict[col] = "user"
                 else:
                     output_dict[col] = input_dict.get(col, "clustering")
 
+            # Save final override
             output_df.at[row_id, "Reference"] = json.dumps(output_dict)
             session.DB_override[table] = output_df
             st.rerun()
