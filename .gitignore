@@ -22,4 +22,4 @@ jupyter/
 *.code-workspace
 
 # Training packages
-training_input/
+app/training_input/
