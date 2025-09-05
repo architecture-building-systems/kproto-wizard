@@ -20,3 +20,6 @@ jupyter/
 .vscode/
 .DS_Store
 *.code-workspace
+
+# Training packages
+training_input/
