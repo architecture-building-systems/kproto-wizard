@@ -12,6 +12,9 @@ RUN pip3 install -r requirements.txt
 # Copy the entire app directory
 COPY app/ ./
 
+# Copy Streamlit configuration
+COPY .streamlit/ ./.streamlit/
+
 # Expose the port Streamlit runs on
 EXPOSE 8501
 
