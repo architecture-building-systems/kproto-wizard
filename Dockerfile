@@ -1,7 +1,7 @@
 FROM python:3.13-slim
 
 # Set working directory
-WORKDIR /app
+WORKDIR /workspace
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
@@ -9,8 +9,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip3 install -r requirements.txt
 
-# Copy the entire app directory
-COPY app/ ./
+# Copy the entire app directory (preserving structure)
+COPY app/ ./app/
 
 # Copy Streamlit configuration
 COPY .streamlit/ ./.streamlit/
