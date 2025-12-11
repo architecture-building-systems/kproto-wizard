@@ -1,3 +1,4 @@
+```
 cea_wizard/
 │
 ├── main.py                             # Entry point: handles page routing
@@ -24,3 +25,4 @@ cea_wizard/
 │   ├── file_io.py                      # Shared file helpers (e.g., download, read/write)
 │   ├── session_manager.py              # Shared session tracking utilities
 │   └── constants.py                    # File paths, cluster color palettes, etc.
+```
